@@ -1,10 +1,16 @@
 """Task domain Pydantic v2 schemas."""
 
 from datetime import datetime
+from typing import Any
 
-from pydantic import Field
+from pydantic import Field, ValidationInfo, field_validator
 
-from app.core.constants import TaskPriority, TaskStatus
+from app.core.constants import (
+    MAX_TASK_DESC_LENGTH,
+    MAX_TASK_TITLE_LENGTH,
+    TaskPriority,
+    TaskStatus,
+)
 from app.schemas.base import AppBaseModel
 
 
@@ -14,13 +20,13 @@ class TaskBase(AppBaseModel):
     title: str = Field(
         ...,
         min_length=1,
-        max_length=255,
+        max_length=MAX_TASK_TITLE_LENGTH,
         description="Task title (cannot be empty)",
         examples=["Set up project layered architecture"],
     )
     description: str | None = Field(
         default=None,
-        max_length=2000,
+        max_length=MAX_TASK_DESC_LENGTH,
         description="Detailed description of the task",
         examples=["Implement clean routers, services, repositories, and schemas."],
     )
@@ -60,12 +66,12 @@ class TaskUpdate(AppBaseModel):
     title: str | None = Field(
         default=None,
         min_length=1,
-        max_length=255,
+        max_length=MAX_TASK_TITLE_LENGTH,
         description="Updated title",
     )
     description: str | None = Field(
         default=None,
-        max_length=2000,
+        max_length=MAX_TASK_DESC_LENGTH,
         description="Updated description",
     )
     status: TaskStatus | None = Field(
@@ -85,6 +91,14 @@ class TaskUpdate(AppBaseModel):
         gt=0,
         description="Updated assignee user ID",
     )
+
+    @field_validator("title", "status", "priority", mode="after")
+    @classmethod
+    def reject_null_for_non_nullable_fields(cls, v: Any, info: ValidationInfo) -> Any:
+        """Prevent sending explicit null to NOT NULL columns in PATCH requests."""
+        if v is None:
+            raise ValueError(f"{info.field_name} cannot be null.")
+        return v
 
 
 class TaskResponse(TaskBase):

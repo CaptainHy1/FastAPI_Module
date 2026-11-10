@@ -10,18 +10,16 @@ from fastapi import Depends, Query
 
 from app.core.config import Settings, get_settings
 from app.core.constants import DEFAULT_PAGE, DEFAULT_PAGE_SIZE, TaskPriority, TaskStatus
+from app.core.database import DbSession
 from app.repositories.task import TaskRepository
 from app.schemas.base import PaginationParams
 from app.schemas.task import TaskFilterParams
 from app.services.task import TaskService
 
-# Singleton instance of in-memory repository for Session 1
-_task_repository = TaskRepository()
 
-
-def get_task_repository() -> TaskRepository:
-    """Dependency provider for TaskRepository."""
-    return _task_repository
+def get_task_repository(db: DbSession) -> TaskRepository:
+    """Dependency provider for TaskRepository backed by AsyncSession."""
+    return TaskRepository(db=db)
 
 
 def get_task_service(

@@ -31,3 +31,5 @@ LAST_ADMIN_PROTECTED: str = (
 INTERNAL_SERVER_ERROR: str = "An unexpected error occurred. Please try again later."
 RESOURCE_NOT_FOUND: str = "The requested resource was not found."
 VALIDATION_FAILED: str = "Request validation failed."
+DATABASE_CONFLICT: str = "Resource conflict occurred."
+INVALID_REFERENCE: str = "Referenced project or user does not exist."
