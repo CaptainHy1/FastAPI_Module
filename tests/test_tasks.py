@@ -1,7 +1,15 @@
-"""Tests for task CRUD endpoints and validation."""
+"""Tests for task CRUD endpoints, database integration, and ORM relationships."""
 
 import pytest
 from httpx import AsyncClient
+from pydantic import ValidationError
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
+
+from app.core import messages
+from app.core.config import Settings
+from app.models import Comment, Label, Project, Task, User, Workspace
 
 
 @pytest.mark.asyncio
@@ -145,3 +153,145 @@ async def test_delete_task(async_client: AsyncClient) -> None:
 
     get_resp = await async_client.get(f"/api/v1/tasks/{task_id}")
     assert get_resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_create_task_invalid_project_returns_400(
+    async_client: AsyncClient,
+) -> None:
+    """Test creating a task with nonexistent project_id handles IntegrityError."""
+    payload = {
+        "title": "Orphan Task",
+        "project_id": 9999,
+    }
+    response = await async_client.post("/api/v1/tasks", json=payload)
+    assert response.status_code == 400
+    data = response.json()
+    assert data["error"]["code"] == 400
+    assert data["error"]["message"] == messages.INVALID_REFERENCE
+
+
+@pytest.mark.asyncio
+async def test_list_tasks_search_and_priority_filter(
+    async_client: AsyncClient,
+) -> None:
+    """Test filtering by priority and case-insensitive search."""
+    await async_client.post(
+        "/api/v1/tasks",
+        json={
+            "title": "Fix Alembic Migration",
+            "priority": "URGENT",
+            "project_id": 1,
+        },
+    )
+    await async_client.post(
+        "/api/v1/tasks",
+        json={
+            "title": "Write Docs",
+            "priority": "LOW",
+            "project_id": 1,
+        },
+    )
+
+    response = await async_client.get("/api/v1/tasks?priority=URGENT&search=alembic")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["total"] == 1
+    assert data["items"][0]["title"] == "Fix Alembic Migration"
+
+
+@pytest.mark.asyncio
+async def test_orm_relationships(db_session: AsyncSession) -> None:
+    """Verify bidirectional SQLAlchemy 2.x relationships across all core entities."""
+    task = Task(
+        project_id=1,
+        created_by=1,
+        assignee_id=1,
+        title="Relationship Check",
+    )
+    label = Label(project_id=1, name="backend", color="#10B981")
+    task.labels.append(label)
+    db_session.add(task)
+    await db_session.flush()
+
+    comment = Comment(task_id=task.id, author_id=1, content="Looks good!")
+    db_session.add(comment)
+    await db_session.commit()
+
+    stmt = (
+        select(Task)
+        .where(Task.id == task.id)
+        .options(
+            selectinload(Task.project)
+            .selectinload(Project.workspace)
+            .selectinload(Workspace.owner),
+            selectinload(Task.creator),
+            selectinload(Task.assignee),
+            selectinload(Task.labels),
+            selectinload(Task.comments).selectinload(Comment.author),
+        )
+    )
+    loaded = (await db_session.execute(stmt)).scalar_one()
+
+    assert loaded.project.name == "TaskHub Core"
+    assert loaded.project.workspace.name == "Default Workspace"
+    assert loaded.project.workspace.owner.email == "demo@taskhub.dev"
+    assert isinstance(loaded.creator, User)
+    assert loaded.assignee is not None and loaded.assignee.id == 1
+    assert len(loaded.labels) == 1
+    assert loaded.labels[0].name == "backend"
+    assert len(loaded.comments) == 1
+    assert loaded.comments[0].content == "Looks good!"
+
+
+@pytest.mark.asyncio
+async def test_update_task_null_on_not_null_fields_returns_422(
+    async_client: AsyncClient,
+) -> None:
+    """Test sending null to NOT NULL columns in PATCH returns 422, never 500."""
+    created = await async_client.post(
+        "/api/v1/tasks",
+        json={"title": "Valid Task", "project_id": 1},
+    )
+    task_id = created.json()["id"]
+
+    for field in ("title", "status", "priority"):
+        response = await async_client.patch(
+            f"/api/v1/tasks/{task_id}",
+            json={field: None},
+        )
+        assert response.status_code == 422, f"Expected 422 for {field}=null"
+        data = response.json()
+        assert data["error"]["code"] == 422
+
+
+@pytest.mark.asyncio
+async def test_update_task_null_on_nullable_fields_succeeds(
+    async_client: AsyncClient,
+) -> None:
+    """Test clearing nullable columns (description, assignee_id) returns 200."""
+    created = await async_client.post(
+        "/api/v1/tasks",
+        json={
+            "title": "Nullable Check",
+            "description": "Some notes",
+            "assignee_id": 1,
+            "project_id": 1,
+        },
+    )
+    task_id = created.json()["id"]
+
+    response = await async_client.patch(
+        f"/api/v1/tasks/{task_id}",
+        json={"description": None, "assignee_id": None},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["description"] is None
+    assert data["assignee_id"] is None
+
+
+def test_settings_rejects_whitespace_secret_key() -> None:
+    """Test Settings fails fast if SECRET_KEY is empty or whitespace-only."""
+    with pytest.raises(ValidationError):
+        Settings(SECRET_KEY=" " * 32)
