@@ -3,6 +3,8 @@
 Prevents hardcoded strings in routers, services, and dependencies.
 """
 
+from app.core.constants import MAX_PASSWORD_BYTES, MIN_PASSWORD_LENGTH
+
 # Health & System
 HEALTH_CHECK_OK: str = "TaskHub API is up and running."
 
@@ -11,7 +13,7 @@ TASK_NOT_FOUND: str = "Task not found."
 TASK_TITLE_REQUIRED: str = "Task title cannot be empty."
 TASK_DELETED_SUCCESS: str = "Task deleted successfully."
 
-# Authentication & Authorization (Prepared for Auth Session)
+# Authentication & Authorization
 INACTIVE_USER: str = "User account is inactive."
 INVALID_CREDENTIALS: str = "Incorrect email or password."
 EMAIL_ALREADY_EXISTS: str = "Email is already registered."
@@ -19,10 +21,20 @@ TOKEN_EXPIRED: str = "Authentication token has expired."
 TOKEN_INVALID: str = "Could not validate credentials."
 INVALID_TOKEN_TYPE: str = "Invalid token type provided."
 REFRESH_TOKEN_REVOKED: str = "Refresh token has been revoked."
+INVALID_CURRENT_PASSWORD: str = "Current password is incorrect."
+PASSWORD_TOO_SHORT: str = (
+    f"Password must be at least {MIN_PASSWORD_LENGTH} characters long."
+)
+PASSWORD_TOO_LONG_BYTES: str = f"Password must not exceed {MAX_PASSWORD_BYTES} bytes."
+PASSWORD_CHANGED_SUCCESS: str = "Password changed successfully."
+LOGOUT_SUCCESS: str = "Logged out successfully."
 
 # Permissions & RBAC
+USER_NOT_FOUND: str = "User not found."
 PERMISSION_DENIED: str = "You do not have permission to perform this action."
 CANNOT_DELETE_SELF: str = "Administrators cannot delete their own account."
+CANNOT_DEACTIVATE_SELF: str = "Administrators cannot deactivate their own account."
+CANNOT_DEMOTE_SELF: str = "Administrators cannot remove their own admin role."
 LAST_ADMIN_PROTECTED: str = (
     "Cannot remove or deactivate the last remaining active administrator."
 )
