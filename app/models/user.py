@@ -3,15 +3,17 @@
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Boolean, DateTime, String, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, String, func
 from sqlalchemy import Enum as SAEnum
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.constants import (
     ENUM_COLUMN_LENGTH,
+    JTI_LENGTH,
     MAX_EMAIL_LENGTH,
     MAX_FULL_NAME_LENGTH,
     MAX_PASSWORD_HASH_LENGTH,
+    TOKEN_HASH_LENGTH,
     UserRole,
 )
 from app.models.base import Base
@@ -63,3 +65,33 @@ class User(Base):
     comments: Mapped[list["Comment"]] = relationship(
         back_populates="author", cascade="all, delete-orphan"
     )
+    refresh_tokens: Mapped[list["RefreshToken"]] = relationship(
+        back_populates="user", cascade="all, delete-orphan"
+    )
+
+
+class RefreshToken(Base):
+    """Persisted refresh token record supporting atomic rotation and revocation."""
+
+    __tablename__ = "refresh_tokens"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    jti: Mapped[str] = mapped_column(
+        String(JTI_LENGTH), unique=True, index=True, nullable=False
+    )
+    token_hash: Mapped[str] = mapped_column(
+        String(TOKEN_HASH_LENGTH), unique=True, index=True, nullable=False
+    )
+    revoked: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    # Relationships
+    user: Mapped["User"] = relationship(back_populates="refresh_tokens")
