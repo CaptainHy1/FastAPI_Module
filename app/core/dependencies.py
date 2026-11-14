@@ -15,6 +15,9 @@ from app.core.constants import (
     BEARER_SCHEME,
     DEFAULT_PAGE,
     DEFAULT_PAGE_SIZE,
+    MAX_PAGE_SIZE,
+    MAX_SEARCH_LENGTH,
+    MIN_STRING_LENGTH,
     TaskPriority,
     TaskStatus,
     TokenType,
@@ -24,13 +27,17 @@ from app.core.database import DbSession
 from app.core.exceptions import ForbiddenException, UnauthorizedException
 from app.core.security import decode_token
 from app.models.user import User
+from app.repositories.project import ProjectRepository
 from app.repositories.task import TaskRepository
 from app.repositories.user import RefreshTokenRepository, UserRepository
+from app.repositories.workspace import WorkspaceRepository
 from app.schemas.base import PaginationParams
 from app.schemas.task import TaskFilterParams
 from app.services.auth import AuthService
+from app.services.project import ProjectService
 from app.services.task import TaskService
 from app.services.user import UserService
+from app.services.workspace import WorkspaceService
 
 # Enables Bearer Auth button ("Authorize") in Swagger UI / ReDoc
 bearer_scheme = HTTPBearer(auto_error=False)
@@ -41,13 +48,6 @@ def get_task_repository(db: DbSession) -> TaskRepository:
     return TaskRepository(db=db)
 
 
-def get_task_service(
-    repo: Annotated[TaskRepository, Depends(get_task_repository)],
-) -> TaskService:
-    """Dependency provider for TaskService."""
-    return TaskService(repository=repo)
-
-
 def get_user_repository(db: DbSession) -> UserRepository:
     """Dependency provider for UserRepository."""
     return UserRepository(db=db)
@@ -56,6 +56,45 @@ def get_user_repository(db: DbSession) -> UserRepository:
 def get_refresh_token_repository(db: DbSession) -> RefreshTokenRepository:
     """Dependency provider for RefreshTokenRepository."""
     return RefreshTokenRepository(db=db)
+
+
+def get_workspace_repository(db: DbSession) -> WorkspaceRepository:
+    """Dependency provider for WorkspaceRepository."""
+    return WorkspaceRepository(db=db)
+
+
+def get_project_repository(db: DbSession) -> ProjectRepository:
+    """Dependency provider for ProjectRepository."""
+    return ProjectRepository(db=db)
+
+
+def get_workspace_service(
+    repo: Annotated[WorkspaceRepository, Depends(get_workspace_repository)],
+    user_repo: Annotated[UserRepository, Depends(get_user_repository)],
+) -> WorkspaceService:
+    """Dependency provider for WorkspaceService."""
+    return WorkspaceService(repository=repo, user_repository=user_repo)
+
+
+def get_project_service(
+    repo: Annotated[ProjectRepository, Depends(get_project_repository)],
+    workspace_repo: Annotated[WorkspaceRepository, Depends(get_workspace_repository)],
+) -> ProjectService:
+    """Dependency provider for ProjectService."""
+    return ProjectService(repository=repo, workspace_repository=workspace_repo)
+
+
+def get_task_service(
+    repo: Annotated[TaskRepository, Depends(get_task_repository)],
+    project_repo: Annotated[ProjectRepository, Depends(get_project_repository)],
+    workspace_repo: Annotated[WorkspaceRepository, Depends(get_workspace_repository)],
+) -> TaskService:
+    """Dependency provider for TaskService with object-level RBAC repositories."""
+    return TaskService(
+        repository=repo,
+        project_repository=project_repo,
+        workspace_repository=workspace_repo,
+    )
 
 
 def get_auth_service(
@@ -113,7 +152,13 @@ def get_pagination_params(
         int, Query(ge=1, description="Page number", examples=[1])
     ] = DEFAULT_PAGE,
     page_size: Annotated[
-        int, Query(ge=1, le=100, description="Page size", examples=[10])
+        int,
+        Query(
+            ge=1,
+            le=MAX_PAGE_SIZE,
+            description="Page size",
+            examples=[10],
+        ),
     ] = DEFAULT_PAGE_SIZE,
 ) -> PaginationParams:
     """Dependency extracting pagination parameters from query string."""
@@ -127,8 +172,8 @@ def get_task_filter_params(
     priority: Annotated[
         TaskPriority | None, Query(description="Filter by task priority")
     ] = None,
-    project_id: Annotated[
-        int | None, Query(gt=0, description="Filter by project ID")
+    project_id_filter: Annotated[
+        int | None, Query(alias="project_id", gt=0, description="Filter by project ID")
     ] = None,
     assignee_id: Annotated[
         int | None, Query(gt=0, description="Filter by assignee user ID")
@@ -136,7 +181,9 @@ def get_task_filter_params(
     search: Annotated[
         str | None,
         Query(
-            min_length=1, max_length=100, description="Search term in title/description"
+            min_length=MIN_STRING_LENGTH,
+            max_length=MAX_SEARCH_LENGTH,
+            description="Search term in title/description",
         ),
     ] = None,
 ) -> TaskFilterParams:
@@ -144,7 +191,7 @@ def get_task_filter_params(
     return TaskFilterParams(
         status=status,
         priority=priority,
-        project_id=project_id,
+        project_id=project_id_filter,
         assignee_id=assignee_id,
         search=search,
     )
@@ -154,6 +201,8 @@ def get_task_filter_params(
 SettingsDep = Annotated[Settings, Depends(get_settings)]
 TaskRepositoryDep = Annotated[TaskRepository, Depends(get_task_repository)]
 TaskServiceDep = Annotated[TaskService, Depends(get_task_service)]
+WorkspaceServiceDep = Annotated[WorkspaceService, Depends(get_workspace_service)]
+ProjectServiceDep = Annotated[ProjectService, Depends(get_project_service)]
 AuthServiceDep = Annotated[AuthService, Depends(get_auth_service)]
 UserServiceDep = Annotated[UserService, Depends(get_user_service)]
 CurrentUser = Annotated[User, Depends(get_current_user)]

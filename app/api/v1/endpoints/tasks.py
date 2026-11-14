@@ -1,10 +1,15 @@
-"""Task management CRUD endpoints."""
+"""Task management CRUD endpoints with authentication and RBAC."""
 
 from typing import Annotated
 
 from fastapi import APIRouter, Path, status
 
-from app.core.dependencies import PaginationDep, TaskFilterDep, TaskServiceDep
+from app.core.dependencies import (
+    CurrentUser,
+    PaginationDep,
+    TaskFilterDep,
+    TaskServiceDep,
+)
 from app.schemas.base import PaginatedResponse
 from app.schemas.task import TaskCreate, TaskResponse, TaskUpdate
 
@@ -22,10 +27,11 @@ router = APIRouter()
 )
 async def create_task(
     task_in: TaskCreate,
+    current_user: CurrentUser,
     service: TaskServiceDep,
 ) -> TaskResponse:
     """Create task endpoint."""
-    return await service.create_task(task_in=task_in)
+    return await service.create_task(task_in=task_in, current_user=current_user)
 
 
 @router.get(
@@ -39,12 +45,15 @@ async def create_task(
     ),
 )
 async def list_tasks(
+    current_user: CurrentUser,
     service: TaskServiceDep,
     pagination: PaginationDep,
     filters: TaskFilterDep,
 ) -> PaginatedResponse[TaskResponse]:
     """List paginated tasks endpoint."""
-    return await service.list_tasks(pagination=pagination, filters=filters)
+    return await service.list_tasks(
+        pagination=pagination, filters=filters, current_user=current_user
+    )
 
 
 @router.get(
@@ -56,10 +65,11 @@ async def list_tasks(
 )
 async def get_task(
     task_id: Annotated[int, Path(gt=0, description="Task ID", examples=[1])],
+    current_user: CurrentUser,
     service: TaskServiceDep,
 ) -> TaskResponse:
     """Get single task by ID."""
-    return await service.get_task_by_id(task_id)
+    return await service.get_task_by_id(task_id=task_id, current_user=current_user)
 
 
 @router.patch(
@@ -74,10 +84,13 @@ async def get_task(
 async def update_task(
     task_id: Annotated[int, Path(gt=0, description="Task ID", examples=[1])],
     task_in: TaskUpdate,
+    current_user: CurrentUser,
     service: TaskServiceDep,
 ) -> TaskResponse:
     """Partial update task endpoint."""
-    return await service.update_task(task_id=task_id, task_in=task_in)
+    return await service.update_task(
+        task_id=task_id, task_in=task_in, current_user=current_user
+    )
 
 
 @router.delete(
@@ -88,7 +101,8 @@ async def update_task(
 )
 async def delete_task(
     task_id: Annotated[int, Path(gt=0, description="Task ID", examples=[1])],
+    current_user: CurrentUser,
     service: TaskServiceDep,
 ) -> None:
     """Delete task endpoint."""
-    await service.delete_task(task_id)
+    await service.delete_task(task_id=task_id, current_user=current_user)

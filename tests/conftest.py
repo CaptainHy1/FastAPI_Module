@@ -113,3 +113,14 @@ async def async_client() -> AsyncGenerator[AsyncClient, None]:
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         yield client
+
+
+@pytest.fixture
+async def admin_auth_headers(async_client: AsyncClient) -> dict[str, str]:
+    """Provide authentication headers for the seeded admin user."""
+    login = await async_client.post(
+        "/api/v1/auth/login",
+        json={"email": "demo@taskhub.dev", "password": "Admin1234!"},
+    )
+    tokens = login.json()
+    return {"Authorization": f"Bearer {tokens['access_token']}"}

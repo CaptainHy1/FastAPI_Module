@@ -39,6 +39,23 @@ LAST_ADMIN_PROTECTED: str = (
     "Cannot remove or deactivate the last remaining active administrator."
 )
 
+# Workspace & Project RBAC Messages
+WORKSPACE_NOT_FOUND: str = "Workspace not found."
+WORKSPACE_OWNER_REQUIRED: str = "Only workspace owner can perform this operation."
+NOT_WORKSPACE_MEMBER: str = "You are not a member of this workspace."
+PROJECT_NOT_FOUND: str = "Project not found."
+PROJECT_EDITOR_REQUIRED: str = (
+    "Only workspace owner or editor can perform this operation on projects."
+)
+TASK_EDITOR_REQUIRED: str = (
+    "Only workspace owner or editor can perform this operation on tasks."
+)
+MEMBER_ALREADY_EXISTS: str = "User is already a member of this workspace."
+MEMBER_NOT_FOUND: str = "Workspace member not found."
+CANNOT_REMOVE_WORKSPACE_OWNER: str = (
+    "Cannot remove or transfer out the primary workspace owner."
+)
+
 # Common / Generic
 INTERNAL_SERVER_ERROR: str = "An unexpected error occurred. Please try again later."
 RESOURCE_NOT_FOUND: str = "The requested resource was not found."

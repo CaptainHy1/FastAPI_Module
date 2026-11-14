@@ -1,5 +1,7 @@
 """Tests for task CRUD endpoints, database integration, and ORM relationships."""
 
+from datetime import UTC, datetime, timedelta
+
 import pytest
 from httpx import AsyncClient
 from pydantic import ValidationError
@@ -13,16 +15,21 @@ from app.models import Comment, Label, Project, Task, User, Workspace
 
 
 @pytest.mark.asyncio
-async def test_create_task_success(async_client: AsyncClient) -> None:
-    """Test creating a valid task with whitespace stripping."""
+async def test_create_task_success(
+    async_client: AsyncClient, admin_auth_headers: dict[str, str]
+) -> None:
+    """Test creating a valid task with whitespace stripping and default TODO status."""
+    future_date = (datetime.now(UTC) + timedelta(days=5)).isoformat()
     payload = {
         "title": "  Setup Layered Architecture  ",
         "description": "  Detailed task description  ",
         "project_id": 1,
         "priority": "HIGH",
-        "status": "TODO",
+        "due_date": future_date,
     }
-    response = await async_client.post("/api/v1/tasks", json=payload)
+    response = await async_client.post(
+        "/api/v1/tasks", json=payload, headers=admin_auth_headers
+    )
     assert response.status_code == 201
     data = response.json()
     assert data["id"] == 1
@@ -30,18 +37,80 @@ async def test_create_task_success(async_client: AsyncClient) -> None:
     assert data["title"] == "Setup Layered Architecture"
     assert data["description"] == "Detailed task description"
     assert data["priority"] == "HIGH"
-    assert data["status"] == "TODO"
+    assert data["status"] == "TODO"  # Status is strictly TODO on create
     assert data["project_id"] == 1
     assert "created_at" in data
     assert "updated_at" in data
 
 
 @pytest.mark.asyncio
-async def test_create_task_validation_failure(async_client: AsyncClient) -> None:
+async def test_create_task_whitespace_only_title_returns_422(
+    async_client: AsyncClient, admin_auth_headers: dict[str, str]
+) -> None:
+    """Test creating a task with whitespace-only title returns 422."""
+    payload = {
+        "title": "     ",
+        "project_id": 1,
+    }
+    response = await async_client.post(
+        "/api/v1/tasks", json=payload, headers=admin_auth_headers
+    )
+    assert response.status_code == 422
+    data = response.json()
+    assert data["error"]["code"] == 422
+
+
+@pytest.mark.asyncio
+async def test_create_task_due_date_in_past_returns_422(
+    async_client: AsyncClient, admin_auth_headers: dict[str, str]
+) -> None:
+    """Test creating a task with past due_date returns 422."""
+    past_date = (datetime.now(UTC) - timedelta(days=2)).isoformat()
+    payload = {
+        "title": "Past Task",
+        "project_id": 1,
+        "due_date": past_date,
+    }
+    response = await async_client.post(
+        "/api/v1/tasks", json=payload, headers=admin_auth_headers
+    )
+    assert response.status_code == 422
+    data = response.json()
+    assert data["error"]["code"] == 422
+
+
+@pytest.mark.asyncio
+async def test_patch_task_due_date_in_past_returns_422(
+    async_client: AsyncClient, admin_auth_headers: dict[str, str]
+) -> None:
+    """Test updating task with past due_date returns 422."""
+    created = await async_client.post(
+        "/api/v1/tasks",
+        json={"title": "Valid Task", "project_id": 1},
+        headers=admin_auth_headers,
+    )
+    task_id = created.json()["id"]
+
+    past_date = (datetime.now(UTC) - timedelta(days=1)).isoformat()
+    response = await async_client.patch(
+        f"/api/v1/tasks/{task_id}",
+        json={"due_date": past_date},
+        headers=admin_auth_headers,
+    )
+    assert response.status_code == 422
+    data = response.json()
+    assert data["error"]["code"] == 422
+
+
+@pytest.mark.asyncio
+async def test_create_task_validation_failure(
+    async_client: AsyncClient, admin_auth_headers: dict[str, str]
+) -> None:
     """Test validation errors return 422 with uniform JSON error structure."""
-    # Missing required title and project_id
     payload = {"description": "Missing title"}
-    response = await async_client.post("/api/v1/tasks", json=payload)
+    response = await async_client.post(
+        "/api/v1/tasks", json=payload, headers=admin_auth_headers
+    )
     assert response.status_code == 422
     data = response.json()
     assert "error" in data
@@ -50,43 +119,53 @@ async def test_create_task_validation_failure(async_client: AsyncClient) -> None
 
 
 @pytest.mark.asyncio
-async def test_get_task_by_id_success(async_client: AsyncClient) -> None:
+async def test_get_task_by_id_success(
+    async_client: AsyncClient, admin_auth_headers: dict[str, str]
+) -> None:
     """Test retrieving existing task."""
     created = await async_client.post(
         "/api/v1/tasks",
         json={"title": "Test Task", "project_id": 1},
+        headers=admin_auth_headers,
     )
     task_id = created.json()["id"]
 
-    response = await async_client.get(f"/api/v1/tasks/{task_id}")
+    response = await async_client.get(
+        f"/api/v1/tasks/{task_id}", headers=admin_auth_headers
+    )
     assert response.status_code == 200
     assert response.json()["title"] == "Test Task"
 
 
 @pytest.mark.asyncio
 async def test_get_task_not_found_returns_custom_error(
-    async_client: AsyncClient,
+    async_client: AsyncClient, admin_auth_headers: dict[str, str]
 ) -> None:
     """Test that missing resource returns 404 with custom AppException envelope."""
-    response = await async_client.get("/api/v1/tasks/9999")
+    response = await async_client.get("/api/v1/tasks/9999", headers=admin_auth_headers)
     assert response.status_code == 404
     data = response.json()
     assert "error" in data
     assert data["error"]["code"] == 404
-    assert data["error"]["message"] == "Task not found."
+    assert data["error"]["message"] == messages.TASK_NOT_FOUND
 
 
 @pytest.mark.asyncio
-async def test_list_tasks_with_pagination(async_client: AsyncClient) -> None:
+async def test_list_tasks_with_pagination(
+    async_client: AsyncClient, admin_auth_headers: dict[str, str]
+) -> None:
     """Test paginated task listing and metadata."""
     for i in range(15):
         await async_client.post(
             "/api/v1/tasks",
             json={"title": f"Task #{i + 1}", "project_id": 1},
+            headers=admin_auth_headers,
         )
 
     # Fetch page 1 (size 10)
-    response = await async_client.get("/api/v1/tasks?page=1&page_size=10")
+    response = await async_client.get(
+        "/api/v1/tasks?page=1&page_size=10", headers=admin_auth_headers
+    )
     assert response.status_code == 200
     data = response.json()
     assert data["total"] == 15
@@ -96,25 +175,39 @@ async def test_list_tasks_with_pagination(async_client: AsyncClient) -> None:
     assert len(data["items"]) == 10
 
     # Fetch page 2 (size 10)
-    response2 = await async_client.get("/api/v1/tasks?page=2&page_size=10")
+    response2 = await async_client.get(
+        "/api/v1/tasks?page=2&page_size=10", headers=admin_auth_headers
+    )
     assert response2.status_code == 200
     data2 = response2.json()
     assert len(data2["items"]) == 5
 
 
 @pytest.mark.asyncio
-async def test_list_tasks_filtered_by_status(async_client: AsyncClient) -> None:
+async def test_list_tasks_filtered_by_status(
+    async_client: AsyncClient, admin_auth_headers: dict[str, str]
+) -> None:
     """Test filtering tasks by status."""
     await async_client.post(
         "/api/v1/tasks",
-        json={"title": "Todo Task", "status": "TODO", "project_id": 1},
+        json={"title": "Todo Task", "project_id": 1},
+        headers=admin_auth_headers,
     )
-    await async_client.post(
+    created2 = await async_client.post(
         "/api/v1/tasks",
-        json={"title": "Done Task", "status": "DONE", "project_id": 1},
+        json={"title": "Done Task", "project_id": 1},
+        headers=admin_auth_headers,
+    )
+    task_id2 = created2.json()["id"]
+    await async_client.patch(
+        f"/api/v1/tasks/{task_id2}",
+        json={"status": "DONE"},
+        headers=admin_auth_headers,
     )
 
-    response = await async_client.get("/api/v1/tasks?status=DONE")
+    response = await async_client.get(
+        "/api/v1/tasks?status=DONE", headers=admin_auth_headers
+    )
     assert response.status_code == 200
     data = response.json()
     assert data["total"] == 1
@@ -122,16 +215,23 @@ async def test_list_tasks_filtered_by_status(async_client: AsyncClient) -> None:
 
 
 @pytest.mark.asyncio
-async def test_update_task_patch(async_client: AsyncClient) -> None:
+async def test_update_task_patch(
+    async_client: AsyncClient, admin_auth_headers: dict[str, str]
+) -> None:
     """Test partial update of a task."""
     created = await async_client.post(
         "/api/v1/tasks",
-        json={"title": "Initial Title", "status": "TODO", "project_id": 1},
+        json={"title": "Initial Title", "project_id": 1},
+        headers=admin_auth_headers,
     )
     task_id = created.json()["id"]
 
     update_payload = {"status": "IN_PROGRESS", "priority": "URGENT"}
-    response = await async_client.patch(f"/api/v1/tasks/{task_id}", json=update_payload)
+    response = await async_client.patch(
+        f"/api/v1/tasks/{task_id}",
+        json=update_payload,
+        headers=admin_auth_headers,
+    )
     assert response.status_code == 200
     data = response.json()
     assert data["title"] == "Initial Title"  # Unchanged
@@ -140,31 +240,40 @@ async def test_update_task_patch(async_client: AsyncClient) -> None:
 
 
 @pytest.mark.asyncio
-async def test_delete_task(async_client: AsyncClient) -> None:
+async def test_delete_task(
+    async_client: AsyncClient, admin_auth_headers: dict[str, str]
+) -> None:
     """Test deleting task returns 204 then 404 upon next query."""
     created = await async_client.post(
         "/api/v1/tasks",
         json={"title": "To be deleted", "project_id": 1},
+        headers=admin_auth_headers,
     )
     task_id = created.json()["id"]
 
-    delete_resp = await async_client.delete(f"/api/v1/tasks/{task_id}")
+    delete_resp = await async_client.delete(
+        f"/api/v1/tasks/{task_id}", headers=admin_auth_headers
+    )
     assert delete_resp.status_code == 204
 
-    get_resp = await async_client.get(f"/api/v1/tasks/{task_id}")
+    get_resp = await async_client.get(
+        f"/api/v1/tasks/{task_id}", headers=admin_auth_headers
+    )
     assert get_resp.status_code == 404
 
 
 @pytest.mark.asyncio
 async def test_create_task_invalid_project_returns_400(
-    async_client: AsyncClient,
+    async_client: AsyncClient, admin_auth_headers: dict[str, str]
 ) -> None:
     """Test creating a task with nonexistent project_id handles IntegrityError."""
     payload = {
         "title": "Orphan Task",
         "project_id": 9999,
     }
-    response = await async_client.post("/api/v1/tasks", json=payload)
+    response = await async_client.post(
+        "/api/v1/tasks", json=payload, headers=admin_auth_headers
+    )
     assert response.status_code == 400
     data = response.json()
     assert data["error"]["code"] == 400
@@ -173,7 +282,7 @@ async def test_create_task_invalid_project_returns_400(
 
 @pytest.mark.asyncio
 async def test_list_tasks_search_and_priority_filter(
-    async_client: AsyncClient,
+    async_client: AsyncClient, admin_auth_headers: dict[str, str]
 ) -> None:
     """Test filtering by priority and case-insensitive search."""
     await async_client.post(
@@ -183,6 +292,7 @@ async def test_list_tasks_search_and_priority_filter(
             "priority": "URGENT",
             "project_id": 1,
         },
+        headers=admin_auth_headers,
     )
     await async_client.post(
         "/api/v1/tasks",
@@ -191,9 +301,13 @@ async def test_list_tasks_search_and_priority_filter(
             "priority": "LOW",
             "project_id": 1,
         },
+        headers=admin_auth_headers,
     )
 
-    response = await async_client.get("/api/v1/tasks?priority=URGENT&search=alembic")
+    response = await async_client.get(
+        "/api/v1/tasks?priority=URGENT&search=alembic",
+        headers=admin_auth_headers,
+    )
     assert response.status_code == 200
     data = response.json()
     assert data["total"] == 1
@@ -246,12 +360,13 @@ async def test_orm_relationships(db_session: AsyncSession) -> None:
 
 @pytest.mark.asyncio
 async def test_update_task_null_on_not_null_fields_returns_422(
-    async_client: AsyncClient,
+    async_client: AsyncClient, admin_auth_headers: dict[str, str]
 ) -> None:
     """Test sending null to NOT NULL columns in PATCH returns 422, never 500."""
     created = await async_client.post(
         "/api/v1/tasks",
         json={"title": "Valid Task", "project_id": 1},
+        headers=admin_auth_headers,
     )
     task_id = created.json()["id"]
 
@@ -259,6 +374,7 @@ async def test_update_task_null_on_not_null_fields_returns_422(
         response = await async_client.patch(
             f"/api/v1/tasks/{task_id}",
             json={field: None},
+            headers=admin_auth_headers,
         )
         assert response.status_code == 422, f"Expected 422 for {field}=null"
         data = response.json()
@@ -267,7 +383,7 @@ async def test_update_task_null_on_not_null_fields_returns_422(
 
 @pytest.mark.asyncio
 async def test_update_task_null_on_nullable_fields_succeeds(
-    async_client: AsyncClient,
+    async_client: AsyncClient, admin_auth_headers: dict[str, str]
 ) -> None:
     """Test clearing nullable columns (description, assignee_id) returns 200."""
     created = await async_client.post(
@@ -278,12 +394,14 @@ async def test_update_task_null_on_nullable_fields_succeeds(
             "assignee_id": 1,
             "project_id": 1,
         },
+        headers=admin_auth_headers,
     )
     task_id = created.json()["id"]
 
     response = await async_client.patch(
         f"/api/v1/tasks/{task_id}",
         json={"description": None, "assignee_id": None},
+        headers=admin_auth_headers,
     )
     assert response.status_code == 200
     data = response.json()

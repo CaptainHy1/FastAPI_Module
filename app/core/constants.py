@@ -81,6 +81,9 @@ MAX_PAGE_SIZE: int = 100
 # ==============================================================================
 # Database & Schema Length Constraints (Shared between Models and Schemas)
 # ==============================================================================
+MIN_STRING_LENGTH: int = 1
+MAX_SEARCH_LENGTH: int = 100
+
 MAX_EMAIL_LENGTH: int = 255
 MIN_FULL_NAME_LENGTH: int = 2
 MAX_FULL_NAME_LENGTH: int = 100
