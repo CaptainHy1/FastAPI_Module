@@ -25,7 +25,7 @@ class TaskService:
         task = await self.repository.get_by_id(task_id)
         if not task:
             raise NotFoundException(message=messages.TASK_NOT_FOUND)
-        return task
+        return TaskResponse.model_validate(task)
 
     async def list_tasks(
         self,
@@ -46,7 +46,7 @@ class TaskService:
         total_pages = math.ceil(total / pagination.page_size) if total > 0 else 0
 
         return PaginatedResponse[TaskResponse](
-            items=items,
+            items=[TaskResponse.model_validate(item) for item in items],
             total=total,
             page=pagination.page,
             page_size=pagination.page_size,
@@ -57,14 +57,15 @@ class TaskService:
         self, task_in: TaskCreate, creator_id: int = 1
     ) -> TaskResponse:
         """Create a new task under a project."""
-        return await self.repository.create(obj_in=task_in, created_by=creator_id)
+        task = await self.repository.create(obj_in=task_in, created_by=creator_id)
+        return TaskResponse.model_validate(task)
 
     async def update_task(self, task_id: int, task_in: TaskUpdate) -> TaskResponse:
         """Partially update a task or raise NotFoundException."""
         task = await self.repository.update(task_id, obj_in=task_in)
         if not task:
             raise NotFoundException(message=messages.TASK_NOT_FOUND)
-        return task
+        return TaskResponse.model_validate(task)
 
     async def delete_task(self, task_id: int) -> None:
         """Delete a task or raise NotFoundException."""

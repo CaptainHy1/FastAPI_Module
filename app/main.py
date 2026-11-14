@@ -14,6 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.v1.router import api_v1_router
 from app.core.config import get_settings
+from app.core.database import engine
 from app.core.exception_handlers import (
     app_exception_handler,
     unhandled_exception_handler,
@@ -38,11 +39,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     )
     logger.info("Running in [%s] environment.", settings.ENVIRONMENT)
 
-    # Startup tasks (e.g., database connection pool initialization in Session 2)
     yield
 
-    # Shutdown tasks (e.g., closing database/redis connections)
+    # Shutdown tasks: gracefully dispose SQLAlchemy connection pool
     logger.info("Shutting down %s...", settings.PROJECT_NAME)
+    await engine.dispose()
 
 
 def create_application() -> FastAPI:

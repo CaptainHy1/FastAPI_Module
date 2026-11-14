@@ -11,6 +11,10 @@ from enum import StrEnum
 MIN_PASSWORD_LENGTH: int = 8
 MAX_PASSWORD_BYTES: int = 72  # Strict bcrypt limit (bytes, not characters)
 DEFAULT_JWT_ALGORITHM: str = "HS256"
+BEARER_TOKEN_TYPE: str = "bearer"
+BEARER_SCHEME: str = "bearer"
+TOKEN_HASH_LENGTH: int = 64
+JTI_LENGTH: int = 64
 
 
 # ==============================================================================
@@ -72,3 +76,29 @@ class TaskPriority(StrEnum):
 DEFAULT_PAGE: int = 1
 DEFAULT_PAGE_SIZE: int = 10
 MAX_PAGE_SIZE: int = 100
+
+
+# ==============================================================================
+# Database & Schema Length Constraints (Shared between Models and Schemas)
+# ==============================================================================
+MAX_EMAIL_LENGTH: int = 255
+MIN_FULL_NAME_LENGTH: int = 2
+MAX_FULL_NAME_LENGTH: int = 100
+MAX_PASSWORD_HASH_LENGTH: int = 255
+
+MAX_WORKSPACE_NAME_LENGTH: int = 100
+MAX_PROJECT_NAME_LENGTH: int = 150
+MAX_PROJECT_DESC_LENGTH: int = 2000
+
+MAX_TASK_TITLE_LENGTH: int = 255
+MAX_TASK_DESC_LENGTH: int = 2000
+
+MAX_LABEL_NAME_LENGTH: int = 50
+MAX_LABEL_COLOR_LENGTH: int = 7
+DEFAULT_LABEL_COLOR: str = "#007BFF"
+
+MAX_COMMENT_LENGTH: int = 2000
+ENUM_COLUMN_LENGTH: int = 20
+
+# PostgreSQL SQLSTATE error codes
+PG_FOREIGN_KEY_VIOLATION: str = "23503"

@@ -48,3 +48,8 @@ htmlcov/
 .DS_Store
 Thumbs.db
 
+# Local Databases
+*.db
+*.sqlite
+*.sqlite3
+

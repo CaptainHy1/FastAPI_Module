@@ -35,9 +35,9 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
 
-    # Database Configuration (Session 2 ready, echo from settings, not hardcoded)
+    # Database Configuration (echo from settings, not hardcoded)
     DATABASE_URL: str = (
-        "postgresql+asyncpg://postgres:postgres@localhost:5432/taskhub_dev"
+        "postgresql+asyncpg://postgres:postgres@localhost:5433/taskhub_dev"
     )
     DB_ECHO: bool = False
 
@@ -66,6 +66,7 @@ class Settings(BaseSettings):
         env_file=".env",
         env_file_encoding="utf-8",
         case_sensitive=True,
+        str_strip_whitespace=True,
         extra="ignore",
     )
 

@@ -1,37 +1,31 @@
-"""Task repository implementation.
+"""Task repository implementation using SQLAlchemy 2.x async."""
 
-In Session 1 (Core Setup & Architecture), this provides an in-memory async
-data-access implementation conforming to BaseRepository[T, CreateSchema, UpdateSchema].
-In Session 2, this will be extended/swapped with SQLAlchemy 2.x async repository.
-"""
-
-from datetime import UTC, datetime
 from typing import Any
 
+from sqlalchemy import func, or_, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.core.constants import TaskPriority, TaskStatus
+from app.models.task import Task
 from app.repositories.base import BaseRepository
-from app.schemas.task import TaskCreate, TaskResponse, TaskUpdate
+from app.schemas.task import TaskCreate, TaskUpdate
 
 
-class TaskRepository(BaseRepository[TaskResponse, TaskCreate, TaskUpdate]):
-    """Repository managing Task entities with async CRUD capabilities."""
+class TaskRepository(BaseRepository[Task, TaskCreate, TaskUpdate]):
+    """Async repository for Task CRUD, filtering, and pagination."""
 
-    def __init__(self) -> None:
-        self._storage: dict[int, TaskResponse] = {}
-        self._current_id: int = 0
-
-    async def get_by_id(self, id_: int) -> TaskResponse | None:
-        """Fetch task by ID."""
-        return self._storage.get(id_)
+    def __init__(self, db: AsyncSession) -> None:
+        super().__init__(model=Task, db=db)
 
     async def list_items(
         self,
         skip: int = 0,
         limit: int = 10,
         **kwargs: Any,
-    ) -> tuple[list[TaskResponse], int]:
-        """Filter and paginate tasks."""
-        items = list(self._storage.values())
+    ) -> tuple[list[Task], int]:
+        """Filter and paginate tasks using SQLAlchemy async queries."""
+        stmt = select(Task)
+        count_stmt = select(func.count()).select_from(Task)
 
         status_filter: TaskStatus | None = kwargs.get("status")
         priority_filter: TaskPriority | None = kwargs.get("priority")
@@ -39,83 +33,33 @@ class TaskRepository(BaseRepository[TaskResponse, TaskCreate, TaskUpdate]):
         assignee_id_filter: int | None = kwargs.get("assignee_id")
         search: str | None = kwargs.get("search")
 
+        conditions = []
         if status_filter is not None:
-            items = [t for t in items if t.status == status_filter]
-
+            conditions.append(Task.status == status_filter)
         if priority_filter is not None:
-            items = [t for t in items if t.priority == priority_filter]
-
+            conditions.append(Task.priority == priority_filter)
         if project_id_filter is not None:
-            items = [t for t in items if t.project_id == project_id_filter]
-
+            conditions.append(Task.project_id == project_id_filter)
         if assignee_id_filter is not None:
-            items = [t for t in items if t.assignee_id == assignee_id_filter]
-
+            conditions.append(Task.assignee_id == assignee_id_filter)
         if search:
-            search_lower = search.lower()
-            items = [
-                t
-                for t in items
-                if search_lower in t.title.lower()
-                or (t.description and search_lower in t.description.lower())
-            ]
+            pattern = f"%{search}%"
+            conditions.append(
+                or_(Task.title.ilike(pattern), Task.description.ilike(pattern))
+            )
 
-        total = len(items)
-        paginated_items = items[skip : skip + limit]
-        return paginated_items, total
+        if conditions:
+            stmt = stmt.where(*conditions)
+            count_stmt = count_stmt.where(*conditions)
 
-    async def create(
-        self,
-        obj_in: TaskCreate,
-        **kwargs: Any,
-    ) -> TaskResponse:
-        """Persist a new task."""
-        created_by: int = int(kwargs.get("created_by", 1))
-        self._current_id += 1
-        now = datetime.now(UTC)
+        total_result = await self.db.execute(count_stmt)
+        total = int(total_result.scalar_one())
 
-        task = TaskResponse(
-            id=self._current_id,
-            title=obj_in.title,
-            description=obj_in.description,
-            status=obj_in.status,
-            priority=obj_in.priority,
-            due_date=obj_in.due_date,
-            assignee_id=obj_in.assignee_id,
-            project_id=obj_in.project_id,
-            created_by=created_by,
-            created_at=now,
-            updated_at=now,
+        stmt = (
+            stmt.order_by(Task.created_at.desc(), Task.id.desc())
+            .offset(skip)
+            .limit(limit)
         )
-        self._storage[self._current_id] = task
-        return task
-
-    async def update(
-        self,
-        id_: int,
-        obj_in: TaskUpdate,
-        **kwargs: Any,
-    ) -> TaskResponse | None:
-        """Partially update an existing task."""
-        existing = self._storage.get(id_)
-        if not existing:
-            return None
-
-        update_data = obj_in.model_dump(exclude_unset=True)
-        if not update_data:
-            return existing
-
-        task_dict = existing.model_dump()
-        task_dict.update(update_data)
-        task_dict["updated_at"] = datetime.now(UTC)
-
-        updated_task = TaskResponse(**task_dict)
-        self._storage[id_] = updated_task
-        return updated_task
-
-    async def delete(self, id_: int) -> bool:
-        """Delete task by ID."""
-        if id_ in self._storage:
-            del self._storage[id_]
-            return True
-        return False
+        result = await self.db.execute(stmt)
+        items = list(result.scalars().all())
+        return items, total
