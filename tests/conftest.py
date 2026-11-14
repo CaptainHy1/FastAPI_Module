@@ -17,8 +17,11 @@ os.environ["DATABASE_URL"] = "sqlite+aiosqlite:///:memory:"
 
 from app.core.constants import ProjectStatus, UserRole, WorkspaceRole
 from app.core.database import get_db
+from app.core.security import hash_password
 from app.main import app
 from app.models import Base, Project, User, Workspace, WorkspaceMember
+
+_DEMO_ADMIN_PASSWORD_HASH = hash_password("Admin1234!")
 
 test_engine = create_async_engine(
     "sqlite+aiosqlite:///:memory:",
@@ -66,7 +69,7 @@ async def setup_test_database() -> AsyncGenerator[None, None]:
             id=1,
             email="demo@taskhub.dev",
             full_name="Demo User",
-            hashed_password="hashed_placeholder_password",
+            hashed_password=_DEMO_ADMIN_PASSWORD_HASH,
             role=UserRole.ADMIN,
             is_active=True,
         )

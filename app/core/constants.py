@@ -11,6 +11,10 @@ from enum import StrEnum
 MIN_PASSWORD_LENGTH: int = 8
 MAX_PASSWORD_BYTES: int = 72  # Strict bcrypt limit (bytes, not characters)
 DEFAULT_JWT_ALGORITHM: str = "HS256"
+BEARER_TOKEN_TYPE: str = "bearer"
+BEARER_SCHEME: str = "bearer"
+TOKEN_HASH_LENGTH: int = 64
+JTI_LENGTH: int = 64
 
 
 # ==============================================================================
