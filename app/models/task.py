@@ -94,7 +94,7 @@ class Task(Base):
         foreign_keys=[created_by], back_populates="created_tasks"
     )
     labels: Mapped[list["Label"]] = relationship(
-        secondary=task_labels, back_populates="tasks"
+        secondary=task_labels, back_populates="tasks", lazy="selectin"
     )
     comments: Mapped[list["Comment"]] = relationship(
         back_populates="task", cascade="all, delete-orphan"

@@ -14,6 +14,7 @@ from app.core.constants import (
     TaskStatus,
 )
 from app.schemas.base import AppBaseModel
+from app.schemas.label import LabelResponse
 
 
 class TaskBase(AppBaseModel):
@@ -133,6 +134,9 @@ class TaskResponse(TaskBase):
     created_at: datetime = Field(..., description="Timestamp when task was created")
     updated_at: datetime = Field(
         ..., description="Timestamp when task was last updated"
+    )
+    labels: list[LabelResponse] = Field(
+        default_factory=list, description="Associated task labels"
     )
 
 

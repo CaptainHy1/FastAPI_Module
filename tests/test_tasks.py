@@ -263,10 +263,10 @@ async def test_delete_task(
 
 
 @pytest.mark.asyncio
-async def test_create_task_invalid_project_returns_400(
+async def test_create_task_invalid_project_returns_404(
     async_client: AsyncClient, admin_auth_headers: dict[str, str]
 ) -> None:
-    """Test creating a task with nonexistent project_id handles IntegrityError."""
+    """Test creating a task with nonexistent project_id returns 404."""
     payload = {
         "title": "Orphan Task",
         "project_id": 9999,
@@ -274,10 +274,10 @@ async def test_create_task_invalid_project_returns_400(
     response = await async_client.post(
         "/api/v1/tasks", json=payload, headers=admin_auth_headers
     )
-    assert response.status_code == 400
+    assert response.status_code == 404
     data = response.json()
-    assert data["error"]["code"] == 400
-    assert data["error"]["message"] == messages.INVALID_REFERENCE
+    assert data["error"]["code"] == 404
+    assert data["error"]["message"] == messages.PROJECT_NOT_FOUND
 
 
 @pytest.mark.asyncio

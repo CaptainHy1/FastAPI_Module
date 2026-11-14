@@ -6,12 +6,14 @@ from fastapi import APIRouter, Path, status
 
 from app.core.dependencies import (
     CurrentUser,
+    LabelServiceDep,
     PaginationDep,
     ProjectServiceDep,
     TaskFilterDep,
     TaskServiceDep,
 )
 from app.schemas.base import PaginatedResponse
+from app.schemas.label import LabelCreate, LabelResponse
 from app.schemas.project import ProjectResponse, ProjectUpdate
 from app.schemas.task import TaskBase, TaskCreate, TaskResponse
 
@@ -116,3 +118,43 @@ async def list_tasks_in_project(
         filters=filters,
         current_user=current_user,
     )
+
+
+# ==============================================================================
+# Labels Scoped to Project
+# ==============================================================================
+@router.post(
+    "/{project_id}/labels",
+    response_model=LabelResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create label in project",
+    description="Creates a new label within this project (OWNER/EDITOR or ADMIN only).",
+)
+async def create_label_in_project(
+    project_id: Annotated[int, Path(gt=0, description="Project ID")],
+    label_in: LabelCreate,
+    current_user: CurrentUser,
+    service: LabelServiceDep,
+) -> LabelResponse:
+    """Create label in project endpoint."""
+    return await service.create_label(
+        project_id=project_id,
+        label_in=label_in,
+        current_user=current_user,
+    )
+
+
+@router.get(
+    "/{project_id}/labels",
+    response_model=list[LabelResponse],
+    status_code=status.HTTP_200_OK,
+    summary="List labels in project",
+    description="Lists all labels defined for this project (members or ADMIN).",
+)
+async def list_labels_in_project(
+    project_id: Annotated[int, Path(gt=0, description="Project ID")],
+    current_user: CurrentUser,
+    service: LabelServiceDep,
+) -> list[LabelResponse]:
+    """List labels in project endpoint."""
+    return await service.list_labels(project_id=project_id, current_user=current_user)
