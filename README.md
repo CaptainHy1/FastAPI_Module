@@ -1,159 +1,142 @@
-# TaskHub API — Task Management API
+# TaskHub API — Task Management System
 
-A production-ready Task Management API built with **FastAPI 0.111+**, **SQLAlchemy 2.x Async**, **Alembic**, **Pydantic v2**, **PostgreSQL 18**, and **Layered Architecture**.
+A production-ready multi-tenant Task Management REST API built with **FastAPI 0.111+**, **SQLAlchemy 2.x Async**, **Alembic**, **Pydantic v2**, **PostgreSQL 18**, **Redis 7**, and **Docker**.
 
 ---
 
-## 1. Kiến trúc hệ thống (Layered Architecture)
+## 1. Architecture (Layered Architecture)
 
-Dự án tuân thủ nghiêm ngặt mô hình phân tầng (Separation of Concerns):
-
-```
+```text
 Client Request
       │
       ▼
-┌──────────────┐
-│  API Router  │  app/api/v1/ (endpoints, request validation, routing)
-└──────┬───────┘
-       │
-       ▼
-┌──────────────┐
-│   Service    │  app/services/ (business logic, domain validations)
-└──────┬───────┘
-       │
-       ▼
-┌──────────────┐
-│  Repository  │  app/repositories/ (abstract CRUD, data storage)
-└──────┬───────┘
-       │
-       ▼
-┌──────────────┐
-│ Data Storage │  In-memory (Session 1) ➔ SQLAlchemy 2.x Async (Session 2)
-└──────────────┘
+┌─────────────────────┐
+│  Middleware & CORS  │  app/core/middleware.py (X-Request-ID, X-Process-Time, Logging)
+└─────────┬───────────┘
+          │
+          ▼
+┌─────────────────────┐
+│     API Router      │  app/api/v1/ (Routing, OpenAPI docs, Annotated DI)
+└─────────┬───────────┘
+          │
+          ▼
+┌─────────────────────┐
+│      Service        │  app/services/ (Business logic, RBAC, Cache, BackgroundTasks)
+└─────────┬───────────┘
+          │
+          ▼
+┌─────────────────────┐
+│     Repository      │  app/repositories/ (Generic BaseRepository[T], Async SQLAlchemy)
+└─────────┬───────────┘
+          │
+          ▼
+┌─────────────────────┐
+│   PostgreSQL + Redis│  PostgreSQL 18 (Persistence) + Redis 7 (Query Cache)
+└─────────────────────┘
 ```
 
 ---
 
-## 2. Đáp ứng chi tiết các Feedback & Review từ Trainer
+## 2. Core Features
 
-| Yêu cầu / Review của Trainer | Cách giải quyết trong Session 1 | Vị trí code |
-| :--- | :--- | :--- |
-| **Exception & Message**<br>Không raise `HTTPException` hardcode text, dùng custom exception kế thừa `AppException`, handler global, message riêng. | Tạo phân cấp `AppException` (`NotFoundException`, `UnauthorizedException`, ...), handler global format response chuẩn JSON, message gom tập trung trong `messages.py`. 401 giữ header `WWW-Authenticate: Bearer`. | `app/core/exceptions.py`<br>`app/core/exception_handlers.py`<br>`app/core/messages.py` |
-| **Magic Strings & Constants**<br>Không để magic string "access"/"refresh", "HS256"... | Đưa toàn bộ vào Enums: `TokenType`, `TaskStatus`, `TaskPriority`, `UserRole`, `WorkspaceRole`. Constants: `MIN_PASSWORD_LENGTH`, `MAX_PASSWORD_BYTES = 72`. | `app/core/constants.py` |
-| **Annotated Dependency Injection**<br>Dùng `Annotated` thay vì `= Depends(...)`. | Định nghĩa `TaskServiceDep`, `PaginationDep`, `TaskFilterDep`, `SettingsDep` qua `Annotated[..., Depends(...)]`. | `app/core/dependencies.py` |
-| **Pydantic v2 Base Schema**<br>Tự động strip whitespace, validate strictly, không để null gây 500. | `AppBaseModel` bật `str_strip_whitespace=True`, `from_attributes=True`. Schemas có min/max rõ ràng. | `app/schemas/base.py`<br>`app/schemas/task.py` |
-| **Fail-fast Settings**<br>`SECRET_KEY` không được rỗng, validate min_length. `echo` lấy từ settings. | `pydantic-settings` `BaseSettings` với `SECRET_KEY = Field(..., min_length=32)`, `DB_ECHO = False`. Đầy đủ `.env.example`. | `app/core/config.py`<br>`.env.example` |
-| **Lifespan Context**<br>Không dùng `@app.on_event` deprecated. | Dùng `@asynccontextmanager` cho startup & shutdown events. | `app/main.py` |
-| **Số lượng file PR & Test**<br>PR Day 1 dưới ~20 file, không có script test tay ở root. Có test tự động. | Cấu trúc tinh gọn ~18 files chính, test tự động bằng `pytest` + `httpx.AsyncClient`. | `tests/` |
+- **Authentication & Security**: Bcrypt password hashing (enforcing 72-byte UTF-8 limit), JWT Access/Refresh tokens (`sub`, `type`, `jti`, `iat`, `exp`), atomic Refresh Token Rotation with reuse detection & full-session revocation.
+- **User Management**: Profile `GET/PATCH /users/me`, password change (revokes all refresh tokens), Admin CRUD with self-deletion and last-active-admin protection.
+- **Workspace & Project RBAC**: Fine-grained object-level authorization (`ADMIN`, `OWNER`, `EDITOR`, `VIEWER`) across Workspaces, Projects (including `ARCHIVED` lifecycle), and Tasks.
+- **Task Workflows, Labels & Comments**: Project-scoped labels, `task_labels` many-to-many assignment (same-project enforcement), task comments (author/owner deletion), workspace-member assignee validation, status transitions, and multi-criteria filtering + pagination.
+- **Redis Caching & Background Tasks**: Caches `GET /api/v1/projects/{id}/tasks` per filter/page with fail-open degradation and `SCAN`-based invalidation on task/label mutations; dispatches asynchronous email notifications via `BackgroundTasks` on task assignment.
+- **OpenAPI Documentation**: Interactive Swagger UI (`/docs`) and ReDoc (`/redoc`) with HTTPBearer authentication scheme and documented `400/401/403/404/409/422` error envelopes.
 
 ---
 
-## 3. Cấu trúc thư mục (Project Structure)
+## 3. Environment Variables
 
-```
-taskhub/
-├── app/
-│   ├── __init__.py
-│   ├── main.py                     # FastAPI application factory & lifespan
-│   ├── api/
-│   │   ├── __init__.py
-│   │   └── v1/
-│   │       ├── __init__.py
-│   │       ├── router.py           # V1 route aggregator
-│   │       └── endpoints/
-│   │           ├── __init__.py
-│   │           ├── health.py       # Health check endpoint
-│   │           └── tasks.py        # Task CRUD endpoints
-│   ├── core/
-│   │   ├── __init__.py
-│   │   ├── config.py               # Fail-fast settings (pydantic-settings)
-│   │   ├── constants.py            # Enums & constants (no magic strings)
-│   │   ├── messages.py             # Centralized message strings
-│   │   ├── exceptions.py           # Custom AppException hierarchy
-│   │   ├── exception_handlers.py   # Global exception handlers
-│   │   └── dependencies.py         # Annotated dependency injection
-│   ├── repositories/
-│   │   ├── __init__.py
-│   │   ├── base.py                 # Abstract BaseRepository[T]
-│   │   └── task.py                 # TaskRepository implementation
-│   ├── schemas/
-│   │   ├── __init__.py
-│   │   ├── base.py                 # AppBaseModel, PaginatedResponse, ErrorResponse
-│   │   └── task.py                 # TaskBase, TaskCreate, TaskUpdate, TaskResponse
-│   └── services/
-│       ├── __init__.py
-│       └── task.py                 # TaskService (Business logic)
-├── tests/
-│   ├── __init__.py
-│   ├── conftest.py                 # Test fixtures & async client
-│   ├── test_health.py              # Health check tests
-│   └── test_tasks.py               # CRUD & validation tests
-├── .env.example                    # Sample environment variables
-├── .env                            # Local development environment
-├── .gitignore                      # Git ignore file
-├── pyproject.toml                  # Project config, dependencies, ruff & mypy
-└── README.md                       # Documentation
-```
-
----
-
-## 4. Hướng dẫn cài đặt và chạy ứng dụng
-
-### 4.1. Chuẩn bị môi trường
-
-Yêu cầu: **Python 3.11+**
+Copy `.env.example` to `.env` before running locally:
 
 ```bash
-# Di chuyển vào thư mục dự án
-cd taskhub
-
-# Khởi tạo file .env từ .env.example (nếu chưa có)
 cp .env.example .env
 ```
 
-### 4.2. Khởi chạy Server (Local Development)
+| Variable | Required | Default | Description |
+| :--- | :---: | :--- | :--- |
+| `SECRET_KEY` | Yes | *(min 32 chars)* | JWT cryptographic signing key (fail-fast validation) |
+| `DATABASE_URL` | Yes | `postgresql+asyncpg://postgres:postgres@localhost:5433/taskhub_dev` | Async PostgreSQL connection string |
+| `DB_ECHO` | No | `false` | Enable SQLAlchemy SQL query logging |
+| `REDIS_URL` | No | `redis://localhost:6379/0` | Redis connection URL for caching |
+| `CACHE_TTL_SECONDS` | No | `60` | Default cache expiration time in seconds |
+| `LOG_LEVEL` | No | `INFO` | Application logging level (`DEBUG`, `INFO`, `WARNING`, `ERROR`) |
+| `ALLOWED_ORIGINS` | No | `http://localhost:3000,http://127.0.0.1:3000` | Comma-separated or JSON array of CORS origins |
+
+---
+
+## 4. Running with Docker Compose (Full Stack: App + PostgreSQL + Redis)
 
 ```bash
-python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+cd taskhub
+docker compose up --build -d
 ```
 
-- **Swagger UI (OpenAPI Docs)**: [http://localhost:8000/docs](http://localhost:8000/docs)
+This builds the multi-stage non-root `Dockerfile`, starts **PostgreSQL 18** (`db`) and **Redis 7** (`redis`), waits for both to become healthy, automatically runs `alembic upgrade head`, and starts the **TaskHub API** at:
+
+- **Swagger UI**: [http://localhost:8000/docs](http://localhost:8000/docs)
 - **ReDoc**: [http://localhost:8000/redoc](http://localhost:8000/redoc)
 - **Health Check**: `GET http://localhost:8000/api/v1/health`
 
----
+To stop and remove containers:
 
-## 5. Danh sách API Endpoints (Session 1: Task Resource)
-
-| Method | Endpoint | Mô tả | Mã HTTP |
-| :--- | :--- | :--- | :--- |
-| `GET` | `/api/v1/health` | Kiểm tra trạng thái hệ thống | `200 OK` |
-| `POST` | `/api/v1/tasks` | Tạo task mới | `201 Created` |
-| `GET` | `/api/v1/tasks` | Danh sách tasks (hỗ trợ phân trang `page`, `page_size`, lọc `status`, `priority`, tìm kiếm `search`) | `200 OK` |
-| `GET` | `/api/v1/tasks/{id}` | Lấy chi tiết 1 task | `200 OK` / `404 Not Found` |
-| `PATCH`| `/api/v1/tasks/{id}` | Cập nhật một phần task | `200 OK` / `404 Not Found` |
-| `DELETE`| `/api/v1/tasks/{id}` | Xóa task | `204 No Content` / `404 Not Found` |
+```bash
+docker compose down
+```
 
 ---
 
-## 6. Kiểm tra chất lượng Code (Linting, Typing & Testing)
+## 5. Local Development Setup
 
-### 6.1. Chạy Unit & Integration Tests
-
-```bash
-python -m pytest tests -v
-```
-
-### 6.2. Kiểm tra Lint & Format với Ruff (100% pass)
+Requirements: **Python 3.11+**
 
 ```bash
-python -m ruff check app tests
-python -m ruff format --check app tests
+cd taskhub
+pip install -e ".[dev]"
+
+# Start PostgreSQL & Redis containers
+docker compose up -d db redis
+
+# Apply database migrations
+alembic upgrade head
+
+# Run local dev server
+python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-### 6.3. Kiểm tra kiểu dữ liệu với Mypy (Strict mode)
+---
+
+## 6. API Endpoints Overview
+
+| Group | Method & Path | Description |
+| :--- | :--- | :--- |
+| **Health** | `GET /api/v1/health` | Service health check |
+| **Auth** | `POST /api/v1/auth/register`, `/login`, `/refresh`, `/logout` | Registration, JWT tokens, atomic rotation, logout |
+| **Users** | `GET/PATCH /api/v1/users/me`, `POST /users/me/change-password` | Profile & password management |
+| **Users (Admin)** | `PATCH/DELETE /api/v1/users/{user_id}` | Admin user management |
+| **Workspaces** | `POST/GET /api/v1/workspaces`, `GET/PATCH/DELETE /workspaces/{id}` | Workspace CRUD (Owner-only update/delete) |
+| **Members** | `POST/GET /api/v1/workspaces/{id}/members`, `DELETE .../members/{user_id}` | Invite/list/remove workspace members |
+| **Projects** | `POST/GET /api/v1/workspaces/{id}/projects`, `GET/PATCH/DELETE /projects/{id}` | Project CRUD & archiving |
+| **Tasks** | `POST/GET /api/v1/projects/{id}/tasks`, `GET/PATCH/DELETE /api/v1/tasks/{id}` | Task CRUD, Redis-cached listing, filtering & notifications |
+| **Labels** | `POST/GET /api/v1/projects/{id}/labels`, `DELETE /api/v1/labels/{id}` | Project-scoped labels CRUD |
+| **Task Labels** | `POST/DELETE /api/v1/tasks/{id}/labels/{label_id}` | Attach/remove labels on tasks |
+| **Comments** | `POST/GET /api/v1/tasks/{id}/comments`, `DELETE /api/v1/comments/{id}` | Task comments (author/owner deletion) |
+
+---
+
+## 7. Quality Checks (Testing, Linting & Typing)
 
 ```bash
-python -m mypy app
-```
+# Run full automated test suite
+pytest tests -v
 
+# Lint and formatting check (Ruff)
+ruff check .
+ruff format --check .
+
+# Strict static type checking (Mypy)
+mypy app tests
+```
