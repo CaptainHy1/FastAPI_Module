@@ -2,7 +2,7 @@
 
 from typing import Annotated
 
-from fastapi import APIRouter, Path, status
+from fastapi import APIRouter, BackgroundTasks, Path, status
 
 from app.core.dependencies import (
     CommentServiceDep,
@@ -32,9 +32,14 @@ async def create_task(
     task_in: TaskCreate,
     current_user: CurrentUser,
     service: TaskServiceDep,
+    background_tasks: BackgroundTasks,
 ) -> TaskResponse:
     """Create task endpoint."""
-    return await service.create_task(task_in=task_in, current_user=current_user)
+    return await service.create_task(
+        task_in=task_in,
+        current_user=current_user,
+        background_tasks=background_tasks,
+    )
 
 
 @router.get(
@@ -89,10 +94,14 @@ async def update_task(
     task_in: TaskUpdate,
     current_user: CurrentUser,
     service: TaskServiceDep,
+    background_tasks: BackgroundTasks,
 ) -> TaskResponse:
     """Partial update task endpoint."""
     return await service.update_task(
-        task_id=task_id, task_in=task_in, current_user=current_user
+        task_id=task_id,
+        task_in=task_in,
+        current_user=current_user,
+        background_tasks=background_tasks,
     )
 
 

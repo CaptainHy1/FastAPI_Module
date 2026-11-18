@@ -13,6 +13,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.v1.router import api_v1_router
+from app.core.cache import cache_manager
 from app.core.config import get_settings
 from app.core.database import engine
 from app.core.exception_handlers import (
@@ -21,12 +22,9 @@ from app.core.exception_handlers import (
     validation_exception_handler,
 )
 from app.core.exceptions import AppException
+from app.core.middleware import RequestLoggingMiddleware, configure_logging
 
-# Configure root logger
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-)
+configure_logging(get_settings().LOG_LEVEL)
 logger = logging.getLogger("taskhub")
 
 
@@ -39,10 +37,17 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     )
     logger.info("Running in [%s] environment.", settings.ENVIRONMENT)
 
+    if settings.ENVIRONMENT != "testing":
+        await cache_manager.connect(
+            redis_url=settings.REDIS_URL,
+            ttl=settings.CACHE_TTL_SECONDS,
+        )
+
     yield
 
-    # Shutdown tasks: gracefully dispose SQLAlchemy connection pool
+    # Shutdown tasks: gracefully close Redis and SQLAlchemy connection pools
     logger.info("Shutting down %s...", settings.PROJECT_NAME)
+    await cache_manager.close()
     await engine.dispose()
 
 
@@ -59,6 +64,9 @@ def create_application() -> FastAPI:
         openapi_url="/openapi.json",
         lifespan=lifespan,
     )
+
+    # Register HTTP Request Logging & Correlation ID Middleware
+    app.add_middleware(RequestLoggingMiddleware)
 
     # Configure CORS Middleware
     if settings.cors_origins:

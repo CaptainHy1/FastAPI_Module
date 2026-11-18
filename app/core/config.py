@@ -8,7 +8,7 @@ from typing import Literal
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from app.core.constants import DEFAULT_JWT_ALGORITHM
+from app.core.constants import DEFAULT_CACHE_TTL_SECONDS, DEFAULT_JWT_ALGORITHM
 
 
 class Settings(BaseSettings):
@@ -25,6 +25,7 @@ class Settings(BaseSettings):
         "development"
     )
     DEBUG: bool = True
+    LOG_LEVEL: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
 
     # Security & JWT
     # Enforces minimum 32 chars to fail fast if key is insecure or empty
@@ -45,6 +46,11 @@ class Settings(BaseSettings):
 
     # Redis Configuration
     REDIS_URL: str = "redis://localhost:6379/0"
+    CACHE_TTL_SECONDS: int = Field(
+        default=DEFAULT_CACHE_TTL_SECONDS,
+        ge=1,
+        description="Default Redis cache TTL in seconds",
+    )
 
     # CORS
     ALLOWED_ORIGINS: str = "http://localhost:3000,http://127.0.0.1:3000"

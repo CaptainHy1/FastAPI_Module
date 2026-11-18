@@ -105,3 +105,12 @@ ENUM_COLUMN_LENGTH: int = 20
 
 # PostgreSQL SQLSTATE error codes
 PG_FOREIGN_KEY_VIOLATION: str = "23503"
+
+# ==============================================================================
+# Redis Caching & Middleware Constants
+# ==============================================================================
+DEFAULT_CACHE_TTL_SECONDS: int = 60
+PROJECT_TASKS_CACHE_PREFIX: str = "project"
+PROJECT_TASKS_CACHE_RESOURCE: str = "tasks"
+HEADER_REQUEST_ID: str = "X-Request-ID"
+HEADER_PROCESS_TIME: str = "X-Process-Time"

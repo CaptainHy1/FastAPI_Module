@@ -10,6 +10,7 @@ from fastapi import Depends, Query
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from app.core import messages
+from app.core.cache import CacheManager, get_cache_manager
 from app.core.config import Settings, get_settings
 from app.core.constants import (
     BEARER_SCHEME,
@@ -103,13 +104,15 @@ def get_task_service(
     project_repo: Annotated[ProjectRepository, Depends(get_project_repository)],
     workspace_repo: Annotated[WorkspaceRepository, Depends(get_workspace_repository)],
     user_repo: Annotated[UserRepository, Depends(get_user_repository)],
+    cache: Annotated[CacheManager, Depends(get_cache_manager)],
 ) -> TaskService:
-    """Dependency provider for TaskService with object-level RBAC repositories."""
+    """Dependency provider for TaskService with RBAC and Redis caching."""
     return TaskService(
         repository=repo,
         project_repository=project_repo,
         workspace_repository=workspace_repo,
         user_repository=user_repo,
+        cache=cache,
     )
 
 
@@ -118,13 +121,15 @@ def get_label_service(
     project_repo: Annotated[ProjectRepository, Depends(get_project_repository)],
     task_repo: Annotated[TaskRepository, Depends(get_task_repository)],
     workspace_repo: Annotated[WorkspaceRepository, Depends(get_workspace_repository)],
+    cache: Annotated[CacheManager, Depends(get_cache_manager)],
 ) -> LabelService:
-    """Dependency provider for LabelService."""
+    """Dependency provider for LabelService with Redis cache invalidation."""
     return LabelService(
         repository=repo,
         project_repository=project_repo,
         task_repository=task_repo,
         workspace_repository=workspace_repo,
+        cache=cache,
     )
 
 
@@ -245,6 +250,7 @@ def get_task_filter_params(
 
 # Type aliases with Annotated dependencies for clean signatures in route handlers
 SettingsDep = Annotated[Settings, Depends(get_settings)]
+CacheManagerDep = Annotated[CacheManager, Depends(get_cache_manager)]
 TaskRepositoryDep = Annotated[TaskRepository, Depends(get_task_repository)]
 TaskServiceDep = Annotated[TaskService, Depends(get_task_service)]
 WorkspaceServiceDep = Annotated[WorkspaceService, Depends(get_workspace_service)]

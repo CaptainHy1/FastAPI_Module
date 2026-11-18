@@ -1,6 +1,7 @@
 """Label business logic service layer."""
 
 from app.core import messages
+from app.core.cache import CacheManager
 from app.core.constants import UserRole, WorkspaceRole
 from app.core.exceptions import (
     BadRequestException,
@@ -25,11 +26,13 @@ class LabelService:
         project_repository: ProjectRepository,
         task_repository: TaskRepository,
         workspace_repository: WorkspaceRepository,
+        cache: CacheManager | None = None,
     ) -> None:
         self.repository = repository
         self.project_repository = project_repository
         self.task_repository = task_repository
         self.workspace_repository = workspace_repository
+        self.cache = cache
 
     async def _verify_project_access(
         self,
@@ -96,6 +99,8 @@ class LabelService:
             project_id=label.project_id, user=current_user, require_editor=True
         )
         await self.repository.delete(label_id)
+        if self.cache is not None:
+            await self.cache.invalidate_project_tasks(label.project_id)
 
     async def attach_label_to_task(
         self, task_id: int, label_id: int, current_user: User
@@ -134,6 +139,8 @@ class LabelService:
                 raise ForbiddenException(message=messages.TASK_EDITOR_REQUIRED)
 
         await self.repository.attach_to_task(task, label)
+        if self.cache is not None:
+            await self.cache.invalidate_project_tasks(task.project_id)
         updated_task = await self.task_repository.get_by_id(task_id)
         return TaskResponse.model_validate(updated_task)
 
@@ -169,5 +176,7 @@ class LabelService:
                 raise ForbiddenException(message=messages.TASK_EDITOR_REQUIRED)
 
         await self.repository.remove_from_task(task, label)
+        if self.cache is not None:
+            await self.cache.invalidate_project_tasks(task.project_id)
         updated_task = await self.task_repository.get_by_id(task_id)
         return TaskResponse.model_validate(updated_task)
