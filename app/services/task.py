@@ -8,11 +8,12 @@ from app.core import messages
 from app.core.cache import CacheManager
 from app.core.constants import TaskStatus, UserRole, WorkspaceRole
 from app.core.exceptions import (
-    BadRequestException,
     ForbiddenException,
     NotFoundException,
+    UnprocessableEntityException,
 )
 from app.core.notifications import send_task_assigned_notification
+from app.models.project import Project
 from app.models.user import User
 from app.repositories.project import ProjectRepository
 from app.repositories.task import TaskRepository
@@ -25,6 +26,7 @@ from app.schemas.task import (
     TaskResponse,
     TaskUpdate,
 )
+from app.services.workspace import require_workspace_role
 
 
 class TaskService:
@@ -49,28 +51,26 @@ class TaskService:
         project_id: int,
         user: User,
         require_editor: bool = False,
-    ) -> int:
-        """Verify user is member of project's workspace, returning workspace_id."""
+    ) -> Project | None:
+        """Verify project exists and user has workspace access with appropriate role."""
+        if user.role == UserRole.ADMIN:
+            return await self.project_repository.get_by_id(project_id)
+
         project = await self.project_repository.get_by_id(project_id)
         if not project:
             raise NotFoundException(message=messages.PROJECT_NOT_FOUND)
 
-        if user.role == UserRole.ADMIN:
-            return project.workspace_id
-
-        membership = await self.workspace_repository.get_member(
-            project.workspace_id, user.id
+        allowed_roles = (
+            {WorkspaceRole.OWNER, WorkspaceRole.EDITOR} if require_editor else None
         )
-        if not membership:
-            raise ForbiddenException(message=messages.NOT_WORKSPACE_MEMBER)
-
-        if require_editor and membership.role not in (
-            WorkspaceRole.OWNER,
-            WorkspaceRole.EDITOR,
-        ):
-            raise ForbiddenException(message=messages.TASK_EDITOR_REQUIRED)
-
-        return project.workspace_id
+        await require_workspace_role(
+            self.workspace_repository,
+            project.workspace_id,
+            user,
+            allowed_roles,
+            forbidden_message=messages.TASK_EDITOR_REQUIRED,
+        )
+        return project
 
     async def _verify_assignee(
         self, workspace_id: int, assignee_id: int | None
@@ -87,7 +87,9 @@ class TaskService:
             workspace_id, assignee_id
         )
         if not membership:
-            raise BadRequestException(message=messages.ASSIGNEE_NOT_MEMBER)
+            raise UnprocessableEntityException(
+                message=messages.ASSIGNEE_NOT_WORKSPACE_MEMBER
+            )
 
         return target_user
 
@@ -132,6 +134,10 @@ class TaskService:
                 if cached_data is not None:
                     return PaginatedResponse[TaskResponse].model_validate(cached_data)
 
+        member_user_id = (
+            current_user.id if current_user.role != UserRole.ADMIN else None
+        )
+
         items, total = await self.repository.list_items(
             skip=pagination.skip,
             limit=pagination.limit,
@@ -140,6 +146,7 @@ class TaskService:
             project_id=filters.project_id,
             assignee_id=filters.assignee_id,
             search=filters.search,
+            member_user_id=member_user_id,
         )
 
         total_pages = math.ceil(total / pagination.page_size) if total > 0 else 0
@@ -164,12 +171,16 @@ class TaskService:
         background_tasks: BackgroundTasks | None = None,
     ) -> TaskResponse:
         """Create a task, invalidate project cache, and notify assignee if set."""
-        workspace_id = await self._verify_project_access(
+        project = await self._verify_project_access(
             project_id=task_in.project_id,
             user=current_user,
             require_editor=True,
         )
-        assignee = await self._verify_assignee(workspace_id, task_in.assignee_id)
+        assignee: User | None = None
+        if task_in.assignee_id is not None and project is not None:
+            assignee = await self._verify_assignee(
+                project.workspace_id, task_in.assignee_id
+            )
 
         task = await self.repository.create(
             obj_in=task_in,
@@ -210,23 +221,29 @@ class TaskService:
             raise NotFoundException(message=messages.PROJECT_NOT_FOUND)
 
         if current_user.role != UserRole.ADMIN:
-            membership = await self.workspace_repository.get_member(
-                project.workspace_id, current_user.id
+            membership = await require_workspace_role(
+                self.workspace_repository,
+                project.workspace_id,
+                current_user,
             )
-            if not membership:
-                raise ForbiddenException(message=messages.NOT_WORKSPACE_MEMBER)
-
             is_assignee = task.assignee_id == current_user.id
-            is_editor_or_owner = membership.role in (
+            is_editor_or_owner = membership is not None and membership.role in (
                 WorkspaceRole.OWNER,
                 WorkspaceRole.EDITOR,
             )
             if not (is_assignee or is_editor_or_owner):
                 raise ForbiddenException(message=messages.TASK_EDITOR_REQUIRED)
 
+            # Assignee who is only a VIEWER can only update 'status'
+            if is_assignee and not is_editor_or_owner:
+                update_fields = task_in.model_dump(exclude_unset=True)
+                if any(field != "status" for field in update_fields):
+                    raise ForbiddenException(message=messages.ASSIGNEE_STATUS_ONLY)
+
         previous_assignee_id = task.assignee_id
         new_assignee: User | None = None
-        if task_in.assignee_id is not None:
+        update_data = task_in.model_dump(exclude_unset=True)
+        if "assignee_id" in update_data and task_in.assignee_id is not None:
             new_assignee = await self._verify_assignee(
                 project.workspace_id, task_in.assignee_id
             )
