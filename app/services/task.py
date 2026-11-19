@@ -4,7 +4,12 @@ import math
 
 from app.core import messages
 from app.core.constants import TaskStatus, UserRole, WorkspaceRole
-from app.core.exceptions import ForbiddenException, NotFoundException
+from app.core.exceptions import (
+    ForbiddenException,
+    NotFoundException,
+    UnprocessableEntityException,
+)
+from app.models.project import Project
 from app.models.user import User
 from app.repositories.project import ProjectRepository
 from app.repositories.task import TaskRepository
@@ -16,6 +21,7 @@ from app.schemas.task import (
     TaskResponse,
     TaskUpdate,
 )
+from app.services.workspace import require_workspace_role
 
 
 class TaskService:
@@ -36,26 +42,26 @@ class TaskService:
         project_id: int,
         user: User,
         require_editor: bool = False,
-    ) -> None:
-        """Verify user is member of project's workspace with appropriate role."""
+    ) -> Project | None:
+        """Verify project exists and user has workspace access with appropriate role."""
         if user.role == UserRole.ADMIN:
-            return
+            return await self.project_repository.get_by_id(project_id)
 
         project = await self.project_repository.get_by_id(project_id)
         if not project:
             raise NotFoundException(message=messages.PROJECT_NOT_FOUND)
 
-        membership = await self.workspace_repository.get_member(
-            project.workspace_id, user.id
+        allowed_roles = (
+            {WorkspaceRole.OWNER, WorkspaceRole.EDITOR} if require_editor else None
         )
-        if not membership:
-            raise ForbiddenException(message=messages.NOT_WORKSPACE_MEMBER)
-
-        if require_editor and membership.role not in (
-            WorkspaceRole.OWNER,
-            WorkspaceRole.EDITOR,
-        ):
-            raise ForbiddenException(message=messages.TASK_EDITOR_REQUIRED)
+        await require_workspace_role(
+            self.workspace_repository,
+            project.workspace_id,
+            user,
+            allowed_roles,
+            forbidden_message=messages.TASK_EDITOR_REQUIRED,
+        )
+        return project
 
     async def get_task_by_id(self, task_id: int, current_user: User) -> TaskResponse:
         """Fetch a task by ID checking workspace membership."""
@@ -84,6 +90,10 @@ class TaskService:
                 require_editor=False,
             )
 
+        member_user_id = (
+            current_user.id if current_user.role != UserRole.ADMIN else None
+        )
+
         items, total = await self.repository.list_items(
             skip=pagination.skip,
             limit=pagination.limit,
@@ -92,6 +102,7 @@ class TaskService:
             project_id=filters.project_id,
             assignee_id=filters.assignee_id,
             search=filters.search,
+            member_user_id=member_user_id,
         )
 
         total_pages = math.ceil(total / pagination.page_size) if total > 0 else 0
@@ -110,11 +121,20 @@ class TaskService:
         current_user: User,
     ) -> TaskResponse:
         """Create a new task under a project (requires OWNER or EDITOR in workspace)."""
-        await self._verify_project_access(
+        project = await self._verify_project_access(
             project_id=task_in.project_id,
             user=current_user,
             require_editor=True,
         )
+
+        if task_in.assignee_id is not None and project is not None:
+            assignee_member = await self.workspace_repository.get_member(
+                project.workspace_id, task_in.assignee_id
+            )
+            if not assignee_member:
+                raise UnprocessableEntityException(
+                    message=messages.ASSIGNEE_NOT_WORKSPACE_MEMBER
+                )
 
         task = await self.repository.create(
             obj_in=task_in,
@@ -134,24 +154,40 @@ class TaskService:
         if not task:
             raise NotFoundException(message=messages.TASK_NOT_FOUND)
 
+        project = await self.project_repository.get_by_id(task.project_id)
+        if not project:
+            raise NotFoundException(message=messages.PROJECT_NOT_FOUND)
+
         if current_user.role != UserRole.ADMIN:
-            project = await self.project_repository.get_by_id(task.project_id)
-            if not project:
-                raise NotFoundException(message=messages.PROJECT_NOT_FOUND)
-
-            membership = await self.workspace_repository.get_member(
-                project.workspace_id, current_user.id
+            membership = await require_workspace_role(
+                self.workspace_repository,
+                project.workspace_id,
+                current_user,
             )
-            if not membership:
-                raise ForbiddenException(message=messages.NOT_WORKSPACE_MEMBER)
-
             is_assignee = task.assignee_id == current_user.id
-            is_editor_or_owner = membership.role in (
+            is_editor_or_owner = membership is not None and membership.role in (
                 WorkspaceRole.OWNER,
                 WorkspaceRole.EDITOR,
             )
             if not (is_assignee or is_editor_or_owner):
                 raise ForbiddenException(message=messages.TASK_EDITOR_REQUIRED)
+
+            # Assignee who is only a VIEWER can only update 'status'
+            if is_assignee and not is_editor_or_owner:
+                update_fields = task_in.model_dump(exclude_unset=True)
+                if any(field != "status" for field in update_fields):
+                    raise ForbiddenException(message=messages.ASSIGNEE_STATUS_ONLY)
+
+        # Validate that new assignee (if provided) is a workspace member
+        update_data = task_in.model_dump(exclude_unset=True)
+        if "assignee_id" in update_data and task_in.assignee_id is not None:
+            assignee_member = await self.workspace_repository.get_member(
+                project.workspace_id, task_in.assignee_id
+            )
+            if not assignee_member:
+                raise UnprocessableEntityException(
+                    message=messages.ASSIGNEE_NOT_WORKSPACE_MEMBER
+                )
 
         updated = await self.repository.update(task_id, obj_in=task_in)
         if not updated:

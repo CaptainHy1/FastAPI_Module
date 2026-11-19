@@ -6,6 +6,7 @@ from app.core import messages
 from app.core.constants import UserRole, WorkspaceRole
 from app.core.exceptions import ForbiddenException, NotFoundException
 from app.models.user import User
+from app.models.workspace import WorkspaceMember
 from app.repositories.user import UserRepository
 from app.repositories.workspace import WorkspaceRepository
 from app.schemas.base import PaginatedResponse, PaginationParams
@@ -16,6 +17,41 @@ from app.schemas.workspace import (
     WorkspaceResponse,
     WorkspaceUpdate,
 )
+
+
+async def require_workspace_role(
+    workspace_repository: WorkspaceRepository,
+    workspace_id: int,
+    user: User,
+    allowed_roles: set[WorkspaceRole] | None = None,
+    forbidden_message: str | None = None,
+) -> WorkspaceMember | None:
+    """Authorize user membership and role within a workspace.
+
+    System ADMIN users bypass role restrictions. Non-admin users must be
+    active workspace members and hold one of the allowed_roles (if specified).
+    """
+    if user.role == UserRole.ADMIN:
+        return await workspace_repository.get_member(workspace_id, user.id)
+
+    membership = await workspace_repository.get_member(workspace_id, user.id)
+    if not membership:
+        msg = forbidden_message or (
+            messages.WORKSPACE_OWNER_REQUIRED
+            if allowed_roles == {WorkspaceRole.OWNER}
+            else messages.NOT_WORKSPACE_MEMBER
+        )
+        raise ForbiddenException(message=msg)
+
+    if allowed_roles and membership.role not in allowed_roles:
+        msg = forbidden_message or (
+            messages.WORKSPACE_OWNER_REQUIRED
+            if allowed_roles == {WorkspaceRole.OWNER}
+            else messages.TASK_EDITOR_REQUIRED
+        )
+        raise ForbiddenException(message=msg)
+
+    return membership
 
 
 class WorkspaceService:
@@ -70,11 +106,7 @@ class WorkspaceService:
         if not workspace:
             raise NotFoundException(message=messages.WORKSPACE_NOT_FOUND)
 
-        if current_user.role != UserRole.ADMIN:
-            membership = await self.repository.get_member(workspace_id, current_user.id)
-            if not membership:
-                raise ForbiddenException(message=messages.NOT_WORKSPACE_MEMBER)
-
+        await require_workspace_role(self.repository, workspace_id, current_user)
         return WorkspaceResponse.model_validate(workspace)
 
     async def update_workspace(
@@ -88,10 +120,12 @@ class WorkspaceService:
         if not workspace:
             raise NotFoundException(message=messages.WORKSPACE_NOT_FOUND)
 
-        if current_user.role != UserRole.ADMIN:
-            membership = await self.repository.get_member(workspace_id, current_user.id)
-            if not membership or membership.role != WorkspaceRole.OWNER:
-                raise ForbiddenException(message=messages.WORKSPACE_OWNER_REQUIRED)
+        await require_workspace_role(
+            self.repository,
+            workspace_id,
+            current_user,
+            {WorkspaceRole.OWNER},
+        )
 
         updated = await self.repository.update(workspace_id, obj_in=workspace_in)
         if not updated:
@@ -104,10 +138,12 @@ class WorkspaceService:
         if not workspace:
             raise NotFoundException(message=messages.WORKSPACE_NOT_FOUND)
 
-        if current_user.role != UserRole.ADMIN:
-            membership = await self.repository.get_member(workspace_id, current_user.id)
-            if not membership or membership.role != WorkspaceRole.OWNER:
-                raise ForbiddenException(message=messages.WORKSPACE_OWNER_REQUIRED)
+        await require_workspace_role(
+            self.repository,
+            workspace_id,
+            current_user,
+            {WorkspaceRole.OWNER},
+        )
 
         await self.repository.delete(workspace_id)
 
@@ -122,10 +158,12 @@ class WorkspaceService:
         if not workspace:
             raise NotFoundException(message=messages.WORKSPACE_NOT_FOUND)
 
-        if current_user.role != UserRole.ADMIN:
-            membership = await self.repository.get_member(workspace_id, current_user.id)
-            if not membership or membership.role != WorkspaceRole.OWNER:
-                raise ForbiddenException(message=messages.WORKSPACE_OWNER_REQUIRED)
+        await require_workspace_role(
+            self.repository,
+            workspace_id,
+            current_user,
+            {WorkspaceRole.OWNER},
+        )
 
         # Validate target user exists
         target_user = await self.user_repository.get_by_id(member_in.user_id)
@@ -154,10 +192,7 @@ class WorkspaceService:
         if not workspace:
             raise NotFoundException(message=messages.WORKSPACE_NOT_FOUND)
 
-        if current_user.role != UserRole.ADMIN:
-            membership = await self.repository.get_member(workspace_id, current_user.id)
-            if not membership:
-                raise ForbiddenException(message=messages.NOT_WORKSPACE_MEMBER)
+        await require_workspace_role(self.repository, workspace_id, current_user)
 
         members = await self.repository.list_members(workspace_id)
         return [
@@ -186,12 +221,13 @@ class WorkspaceService:
             raise ForbiddenException(message=messages.CANNOT_REMOVE_WORKSPACE_OWNER)
 
         # Caller must be OWNER/ADMIN or removing self
-        if current_user.id != target_user_id and current_user.role != UserRole.ADMIN:
-            caller_membership = await self.repository.get_member(
-                workspace_id, current_user.id
+        if current_user.id != target_user_id:
+            await require_workspace_role(
+                self.repository,
+                workspace_id,
+                current_user,
+                {WorkspaceRole.OWNER},
             )
-            if not caller_membership or caller_membership.role != WorkspaceRole.OWNER:
-                raise ForbiddenException(message=messages.WORKSPACE_OWNER_REQUIRED)
 
         existing_member = await self.repository.get_member(workspace_id, target_user_id)
         if not existing_member:
