@@ -383,3 +383,213 @@ async def test_task_operations_rbac_in_project(
         headers=headers_editor,
     )
     assert e_del_res.status_code == 204
+
+
+@pytest.mark.asyncio
+async def test_task_listing_workspace_isolation(
+    async_client: AsyncClient,
+) -> None:
+    """Non-admin GET /api/v1/tasks only returns tasks from user's workspaces."""
+    headers_a = await _register_and_get_headers(
+        async_client, "iso_a@taskhub.dev", "User A"
+    )
+    headers_b = await _register_and_get_headers(
+        async_client, "iso_b@taskhub.dev", "User B"
+    )
+
+    # Workspace A & Project A & Task A
+    ws_a = (
+        await async_client.post(
+            "/api/v1/workspaces", json={"name": "Workspace A"}, headers=headers_a
+        )
+    ).json()
+    proj_a = (
+        await async_client.post(
+            f"/api/v1/workspaces/{ws_a['id']}/projects",
+            json={"name": "Project A"},
+            headers=headers_a,
+        )
+    ).json()
+    task_a = (
+        await async_client.post(
+            f"/api/v1/projects/{proj_a['id']}/tasks",
+            json={"title": "Task in A"},
+            headers=headers_a,
+        )
+    ).json()
+
+    # Workspace B & Project B & Task B
+    ws_b = (
+        await async_client.post(
+            "/api/v1/workspaces", json={"name": "Workspace B"}, headers=headers_b
+        )
+    ).json()
+    proj_b = (
+        await async_client.post(
+            f"/api/v1/workspaces/{ws_b['id']}/projects",
+            json={"name": "Project B"},
+            headers=headers_b,
+        )
+    ).json()
+    task_b = (
+        await async_client.post(
+            f"/api/v1/projects/{proj_b['id']}/tasks",
+            json={"title": "Task in B"},
+            headers=headers_b,
+        )
+    ).json()
+
+    # User A listing all tasks without project_id only sees Task A
+    list_a = await async_client.get("/api/v1/tasks", headers=headers_a)
+    assert list_a.status_code == 200
+    task_ids_a = [t["id"] for t in list_a.json()["items"]]
+    assert task_a["id"] in task_ids_a
+    assert task_b["id"] not in task_ids_a
+
+    # User B listing all tasks without project_id only sees Task B
+    list_b = await async_client.get("/api/v1/tasks", headers=headers_b)
+    assert list_b.status_code == 200
+    task_ids_b = [t["id"] for t in list_b.json()["items"]]
+    assert task_b["id"] in task_ids_b
+    assert task_a["id"] not in task_ids_b
+
+    # User A cannot query tasks in Project B -> 403 Forbidden
+    cross_res = await async_client.get(
+        f"/api/v1/tasks?project_id={proj_b['id']}", headers=headers_a
+    )
+    assert cross_res.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_task_assignee_must_be_workspace_member(
+    async_client: AsyncClient,
+) -> None:
+    """Assignee must be a member of the workspace (returns 422 if not)."""
+    headers_owner = await _register_and_get_headers(
+        async_client, "asgn_owner@taskhub.dev", "Asgn Owner"
+    )
+    headers_stranger = await _register_and_get_headers(
+        async_client, "stranger@taskhub.dev", "Stranger"
+    )
+
+    stranger_profile = await async_client.get(
+        "/api/v1/users/me", headers=headers_stranger
+    )
+    stranger_id = stranger_profile.json()["id"]
+
+    ws = (
+        await async_client.post(
+            "/api/v1/workspaces", json={"name": "Strict Space"}, headers=headers_owner
+        )
+    ).json()
+    proj = (
+        await async_client.post(
+            f"/api/v1/workspaces/{ws['id']}/projects",
+            json={"name": "Strict Proj"},
+            headers=headers_owner,
+        )
+    ).json()
+
+    # Creating task with non-member assignee -> 422
+    fail_create = await async_client.post(
+        f"/api/v1/projects/{proj['id']}/tasks",
+        json={"title": "Invalid Assignee Task", "assignee_id": stranger_id},
+        headers=headers_owner,
+    )
+    assert fail_create.status_code == 422
+    assert (
+        fail_create.json()["error"]["message"]
+        == messages.ASSIGNEE_NOT_WORKSPACE_MEMBER
+    )
+
+    # Creating task with valid assignee (None) -> 201
+    ok_create = await async_client.post(
+        f"/api/v1/projects/{proj['id']}/tasks",
+        json={"title": "Valid Task", "assignee_id": None},
+        headers=headers_owner,
+    )
+    assert ok_create.status_code == 201
+    task_id = ok_create.json()["id"]
+
+    # Updating task with non-member assignee -> 422
+    fail_patch = await async_client.patch(
+        f"/api/v1/tasks/{task_id}",
+        json={"assignee_id": stranger_id},
+        headers=headers_owner,
+    )
+    assert fail_patch.status_code == 422
+    assert (
+        fail_patch.json()["error"]["message"] == messages.ASSIGNEE_NOT_WORKSPACE_MEMBER
+    )
+
+
+@pytest.mark.asyncio
+async def test_task_assignee_viewer_can_only_update_status(
+    async_client: AsyncClient,
+) -> None:
+    """Assignee who is VIEWER cannot modify title, description, or assignee_id."""
+    headers_owner = await _register_and_get_headers(
+        async_client, "status_owner@taskhub.dev", "Status Owner"
+    )
+    headers_viewer = await _register_and_get_headers(
+        async_client, "status_viewer@taskhub.dev", "Status Viewer"
+    )
+
+    viewer_profile = await async_client.get("/api/v1/users/me", headers=headers_viewer)
+    viewer_id = viewer_profile.json()["id"]
+
+    ws = (
+        await async_client.post(
+            "/api/v1/workspaces", json={"name": "Role Space"}, headers=headers_owner
+        )
+    ).json()
+    await async_client.post(
+        f"/api/v1/workspaces/{ws['id']}/members",
+        json={"user_id": viewer_id, "role": WorkspaceRole.VIEWER},
+        headers=headers_owner,
+    )
+
+    proj = (
+        await async_client.post(
+            f"/api/v1/workspaces/{ws['id']}/projects",
+            json={"name": "Role Proj"},
+            headers=headers_owner,
+        )
+    ).json()
+
+    task = (
+        await async_client.post(
+            f"/api/v1/projects/{proj['id']}/tasks",
+            json={"title": "Viewer Assigned Task", "assignee_id": viewer_id},
+            headers=headers_owner,
+        )
+    ).json()
+    task_id = task["id"]
+
+    # Viewer can update status -> 200
+    status_res = await async_client.patch(
+        f"/api/v1/tasks/{task_id}",
+        json={"status": "DONE"},
+        headers=headers_viewer,
+    )
+    assert status_res.status_code == 200
+    assert status_res.json()["status"] == "DONE"
+
+    # Viewer cannot update title -> 403
+    title_res = await async_client.patch(
+        f"/api/v1/tasks/{task_id}",
+        json={"title": "Hacked Title"},
+        headers=headers_viewer,
+    )
+    assert title_res.status_code == 403
+    assert title_res.json()["error"]["message"] == messages.ASSIGNEE_STATUS_ONLY
+
+    # Viewer cannot update assignee_id -> 403
+    assignee_res = await async_client.patch(
+        f"/api/v1/tasks/{task_id}",
+        json={"assignee_id": None},
+        headers=headers_viewer,
+    )
+    assert assignee_res.status_code == 403
+    assert assignee_res.json()["error"]["message"] == messages.ASSIGNEE_STATUS_ONLY
+

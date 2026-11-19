@@ -333,14 +333,17 @@ async def test_task_assignment_validation_and_status_transitions(
         )
     ).json()
 
-    # Assign to non-member outsider -> 400
+    # Assign to non-member outsider -> 422
     bad_assign = await async_client.post(
         f"/api/v1/projects/{proj['id']}/tasks",
         json={"title": "Invalid Assign", "assignee_id": out_id},
         headers=owner_hdrs,
     )
-    assert bad_assign.status_code == 400
-    assert bad_assign.json()["error"]["message"] == messages.ASSIGNEE_NOT_MEMBER
+    assert bad_assign.status_code == 422
+    assert (
+        bad_assign.json()["error"]["message"]
+        == messages.ASSIGNEE_NOT_WORKSPACE_MEMBER
+    )
 
     # Assign to valid member -> 201
     future_date = (datetime.now(UTC) + timedelta(days=7)).isoformat()
