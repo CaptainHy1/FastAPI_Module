@@ -55,6 +55,8 @@ MEMBER_NOT_FOUND: str = "Workspace member not found."
 CANNOT_REMOVE_WORKSPACE_OWNER: str = (
     "Cannot remove or transfer out the primary workspace owner."
 )
+ASSIGNEE_NOT_WORKSPACE_MEMBER: str = "Assignee must be a member of the workspace."
+ASSIGNEE_STATUS_ONLY: str = "Task assignees can only update task status."
 
 # Day 5: Labels & Comments & Assignee Messages
 LABEL_NOT_FOUND: str = "Label not found."

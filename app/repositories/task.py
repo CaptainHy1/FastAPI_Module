@@ -7,7 +7,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.core.constants import TaskPriority, TaskStatus
+from app.models.project import Project
 from app.models.task import Task
+from app.models.workspace import WorkspaceMember
 from app.repositories.base import BaseRepository
 from app.schemas.task import TaskCreate, TaskUpdate
 
@@ -45,13 +47,26 @@ class TaskRepository(BaseRepository[Task, TaskCreate, TaskUpdate]):
     ) -> tuple[list[Task], int]:
         """Filter and paginate tasks using SQLAlchemy async queries."""
         stmt = select(Task).options(selectinload(Task.labels))
-        count_stmt = select(func.count()).select_from(Task)
+        count_stmt = select(func.count(Task.id)).select_from(Task)
 
         status_filter: TaskStatus | None = kwargs.get("status")
         priority_filter: TaskPriority | None = kwargs.get("priority")
         project_id_filter: int | None = kwargs.get("project_id")
         assignee_id_filter: int | None = kwargs.get("assignee_id")
         search: str | None = kwargs.get("search")
+        member_user_id: int | None = kwargs.get("member_user_id")
+
+        if member_user_id is not None:
+            stmt = stmt.join(Project, Task.project_id == Project.id).join(
+                WorkspaceMember,
+                (Project.workspace_id == WorkspaceMember.workspace_id)
+                & (WorkspaceMember.user_id == member_user_id),
+            )
+            count_stmt = count_stmt.join(Project, Task.project_id == Project.id).join(
+                WorkspaceMember,
+                (Project.workspace_id == WorkspaceMember.workspace_id)
+                & (WorkspaceMember.user_id == member_user_id),
+            )
 
         conditions = []
         if status_filter is not None:

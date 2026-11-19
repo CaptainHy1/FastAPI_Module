@@ -3,13 +3,14 @@
 import math
 
 from app.core import messages
-from app.core.constants import ProjectStatus, UserRole, WorkspaceRole
-from app.core.exceptions import ForbiddenException, NotFoundException
+from app.core.constants import ProjectStatus, WorkspaceRole
+from app.core.exceptions import NotFoundException
 from app.models.user import User
 from app.repositories.project import ProjectRepository
 from app.repositories.workspace import WorkspaceRepository
 from app.schemas.base import PaginatedResponse, PaginationParams
 from app.schemas.project import ProjectCreate, ProjectResponse, ProjectUpdate
+from app.services.workspace import require_workspace_role
 
 
 class ProjectService:
@@ -34,14 +35,13 @@ class ProjectService:
         if not workspace:
             raise NotFoundException(message=messages.WORKSPACE_NOT_FOUND)
 
-        if current_user.role != UserRole.ADMIN:
-            membership = await self.workspace_repository.get_member(
-                workspace_id, current_user.id
-            )
-            if not membership:
-                raise ForbiddenException(message=messages.NOT_WORKSPACE_MEMBER)
-            if membership.role not in (WorkspaceRole.OWNER, WorkspaceRole.EDITOR):
-                raise ForbiddenException(message=messages.PROJECT_EDITOR_REQUIRED)
+        await require_workspace_role(
+            self.workspace_repository,
+            workspace_id,
+            current_user,
+            {WorkspaceRole.OWNER, WorkspaceRole.EDITOR},
+            forbidden_message=messages.PROJECT_EDITOR_REQUIRED,
+        )
 
         project = await self.repository.create(
             obj_in=project_in,
@@ -62,12 +62,11 @@ class ProjectService:
         if not workspace:
             raise NotFoundException(message=messages.WORKSPACE_NOT_FOUND)
 
-        if current_user.role != UserRole.ADMIN:
-            membership = await self.workspace_repository.get_member(
-                workspace_id, current_user.id
-            )
-            if not membership:
-                raise ForbiddenException(message=messages.NOT_WORKSPACE_MEMBER)
+        await require_workspace_role(
+            self.workspace_repository,
+            workspace_id,
+            current_user,
+        )
 
         items, total = await self.repository.list_by_workspace(
             workspace_id=workspace_id,
@@ -93,12 +92,11 @@ class ProjectService:
         if not project:
             raise NotFoundException(message=messages.PROJECT_NOT_FOUND)
 
-        if current_user.role != UserRole.ADMIN:
-            membership = await self.workspace_repository.get_member(
-                project.workspace_id, current_user.id
-            )
-            if not membership:
-                raise ForbiddenException(message=messages.NOT_WORKSPACE_MEMBER)
+        await require_workspace_role(
+            self.workspace_repository,
+            project.workspace_id,
+            current_user,
+        )
 
         return ProjectResponse.model_validate(project)
 
@@ -113,14 +111,13 @@ class ProjectService:
         if not project:
             raise NotFoundException(message=messages.PROJECT_NOT_FOUND)
 
-        if current_user.role != UserRole.ADMIN:
-            membership = await self.workspace_repository.get_member(
-                project.workspace_id, current_user.id
-            )
-            if not membership:
-                raise ForbiddenException(message=messages.NOT_WORKSPACE_MEMBER)
-            if membership.role not in (WorkspaceRole.OWNER, WorkspaceRole.EDITOR):
-                raise ForbiddenException(message=messages.PROJECT_EDITOR_REQUIRED)
+        await require_workspace_role(
+            self.workspace_repository,
+            project.workspace_id,
+            current_user,
+            {WorkspaceRole.OWNER, WorkspaceRole.EDITOR},
+            forbidden_message=messages.PROJECT_EDITOR_REQUIRED,
+        )
 
         updated = await self.repository.update(project_id, obj_in=project_in)
         if not updated:
@@ -133,11 +130,11 @@ class ProjectService:
         if not project:
             raise NotFoundException(message=messages.PROJECT_NOT_FOUND)
 
-        if current_user.role != UserRole.ADMIN:
-            membership = await self.workspace_repository.get_member(
-                project.workspace_id, current_user.id
-            )
-            if not membership or membership.role != WorkspaceRole.OWNER:
-                raise ForbiddenException(message=messages.WORKSPACE_OWNER_REQUIRED)
+        await require_workspace_role(
+            self.workspace_repository,
+            project.workspace_id,
+            current_user,
+            {WorkspaceRole.OWNER},
+        )
 
         await self.repository.delete(project_id)
