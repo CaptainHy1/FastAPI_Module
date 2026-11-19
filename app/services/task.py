@@ -42,14 +42,14 @@ class TaskService:
         project_id: int,
         user: User,
         require_editor: bool = False,
-    ) -> Project | None:
+    ) -> Project:
         """Verify project exists and user has workspace access with appropriate role."""
-        if user.role == UserRole.ADMIN:
-            return await self.project_repository.get_by_id(project_id)
-
         project = await self.project_repository.get_by_id(project_id)
         if not project:
             raise NotFoundException(message=messages.PROJECT_NOT_FOUND)
+
+        if user.role == UserRole.ADMIN:
+            return project
 
         allowed_roles = (
             {WorkspaceRole.OWNER, WorkspaceRole.EDITOR} if require_editor else None
