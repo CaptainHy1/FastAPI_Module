@@ -1,7 +1,5 @@
 """Workspace business logic service layer with fine-grained RBAC."""
 
-import math
-
 from app.core import messages
 from app.core.constants import UserRole, WorkspaceRole
 from app.core.exceptions import ForbiddenException, NotFoundException
@@ -88,14 +86,10 @@ class WorkspaceService:
             limit=pagination.page_size,
             is_admin=is_admin,
         )
-        total_pages = math.ceil(total / pagination.page_size) if total > 0 else 0
-
-        return PaginatedResponse[WorkspaceResponse](
+        return PaginatedResponse.create(
             items=[WorkspaceResponse.model_validate(item) for item in items],
             total=total,
-            page=pagination.page,
-            page_size=pagination.page_size,
-            total_pages=total_pages,
+            pagination=pagination,
         )
 
     async def get_workspace_by_id(

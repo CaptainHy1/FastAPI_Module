@@ -55,6 +55,27 @@ class PaginatedResponse(AppBaseModel, Generic[T]):
     page_size: int = Field(..., ge=1, description="Items per page")
     total_pages: int = Field(..., ge=0, description="Total number of pages")
 
+    @classmethod
+    def create(
+        cls,
+        items: list[T],
+        total: int,
+        pagination: PaginationParams,
+    ) -> "PaginatedResponse[T]":
+        """Factory helper encapsulating total pages calculation (DRY)."""
+        total_pages = (
+            (total + pagination.page_size - 1) // pagination.page_size
+            if total > 0
+            else 0
+        )
+        return cls(
+            items=items,
+            total=total,
+            page=pagination.page,
+            page_size=pagination.page_size,
+            total_pages=total_pages,
+        )
+
 
 class ErrorDetail(AppBaseModel):
     """Structured error detail representation."""

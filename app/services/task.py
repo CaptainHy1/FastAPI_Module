@@ -1,7 +1,6 @@
 """Task business logic service layer with RBAC and versioned Redis caching."""
 
 import logging
-import math
 
 from fastapi import BackgroundTasks
 from pydantic import ValidationError
@@ -184,14 +183,10 @@ class TaskService:
             member_user_id=member_user_id,
         )
 
-        total_pages = math.ceil(total / pagination.page_size) if total > 0 else 0
-
-        response = PaginatedResponse[TaskResponse](
+        response = PaginatedResponse[TaskResponse].create(
             items=[TaskResponse.model_validate(item) for item in items],
             total=total,
-            page=pagination.page,
-            page_size=pagination.page_size,
-            total_pages=total_pages,
+            pagination=pagination,
         )
 
         if cache_key is not None:

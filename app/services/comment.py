@@ -1,7 +1,5 @@
 """Comment business logic service layer."""
 
-import math
-
 from app.core import messages
 from app.core.constants import UserRole, WorkspaceRole
 from app.core.exceptions import ForbiddenException, NotFoundException
@@ -89,13 +87,10 @@ class CommentService:
             skip=pagination.skip,
             limit=pagination.limit,
         )
-        total_pages = math.ceil(total / pagination.page_size) if total > 0 else 0
-        return PaginatedResponse(
+        return PaginatedResponse.create(
             items=[self._to_response(c) for c in items],
             total=total,
-            page=pagination.page,
-            page_size=pagination.page_size,
-            total_pages=total_pages,
+            pagination=pagination,
         )
 
     async def delete_comment(self, comment_id: int, current_user: User) -> None:
