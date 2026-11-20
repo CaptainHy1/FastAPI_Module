@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from pydantic import Field, field_validator
+from pydantic import Field
 
 from app.core.constants import MAX_COMMENT_LENGTH, MIN_STRING_LENGTH
 from app.schemas.base import AppBaseModel
@@ -22,14 +22,6 @@ class CommentBase(AppBaseModel):
 
 class CommentCreate(CommentBase):
     """Schema for posting a comment."""
-
-    @field_validator("content", mode="after")
-    @classmethod
-    def validate_content_not_empty(cls, v: str) -> str:
-        """Ensure comment text is not whitespace-only."""
-        if not v.strip():
-            raise ValueError("Comment content cannot be empty.")
-        return v.strip()
 
 
 class CommentResponse(CommentBase):

@@ -1,19 +1,19 @@
 """Label business logic service layer."""
 
+import math
+
 from app.core import messages
-from app.core.constants import UserRole, WorkspaceRole
-from app.core.exceptions import (
-    BadRequestException,
-    ForbiddenException,
-    NotFoundException,
-)
+from app.core.constants import WorkspaceRole
+from app.core.exceptions import BadRequestException, NotFoundException
 from app.models.user import User
 from app.repositories.label import LabelRepository
 from app.repositories.project import ProjectRepository
 from app.repositories.task import TaskRepository
 from app.repositories.workspace import WorkspaceRepository
+from app.schemas.base import PaginatedResponse, PaginationParams
 from app.schemas.label import LabelCreate, LabelResponse
 from app.schemas.task import TaskResponse
+from app.services.workspace import require_workspace_role
 
 
 class LabelService:
@@ -42,21 +42,21 @@ class LabelService:
         if not project:
             raise NotFoundException(message=messages.PROJECT_NOT_FOUND)
 
-        if user.role == UserRole.ADMIN:
-            return project.workspace_id
-
-        membership = await self.workspace_repository.get_member(
-            project.workspace_id, user.id
+        allowed_roles = (
+            {WorkspaceRole.OWNER, WorkspaceRole.EDITOR} if require_editor else None
         )
-        if not membership:
-            raise ForbiddenException(message=messages.NOT_WORKSPACE_MEMBER)
-
-        if require_editor and membership.role not in (
-            WorkspaceRole.OWNER,
-            WorkspaceRole.EDITOR,
-        ):
-            raise ForbiddenException(message=messages.PROJECT_EDITOR_REQUIRED)
-
+        forbidden_message = (
+            messages.PROJECT_EDITOR_REQUIRED
+            if require_editor
+            else messages.NOT_WORKSPACE_MEMBER
+        )
+        await require_workspace_role(
+            self.workspace_repository,
+            project.workspace_id,
+            user,
+            allowed_roles=allowed_roles,
+            forbidden_message=forbidden_message,
+        )
         return project.workspace_id
 
     async def create_label(
@@ -77,14 +77,28 @@ class LabelService:
         return LabelResponse.model_validate(label)
 
     async def list_labels(
-        self, project_id: int, current_user: User
-    ) -> list[LabelResponse]:
+        self,
+        project_id: int,
+        current_user: User,
+        pagination: PaginationParams,
+    ) -> PaginatedResponse[LabelResponse]:
         """List all labels in a project (workspace members or ADMIN)."""
         await self._verify_project_access(
             project_id=project_id, user=current_user, require_editor=False
         )
-        labels = await self.repository.list_by_project(project_id)
-        return [LabelResponse.model_validate(item) for item in labels]
+        items, total = await self.repository.list_by_project(
+            project_id=project_id,
+            skip=pagination.skip,
+            limit=pagination.limit,
+        )
+        total_pages = math.ceil(total / pagination.page_size) if total > 0 else 0
+        return PaginatedResponse(
+            items=[LabelResponse.model_validate(item) for item in items],
+            total=total,
+            page=pagination.page,
+            page_size=pagination.page_size,
+            total_pages=total_pages,
+        )
 
     async def delete_label(self, label_id: int, current_user: User) -> None:
         """Delete a label (OWNER/EDITOR or ADMIN only)."""
@@ -105,6 +119,19 @@ class LabelService:
         if not task:
             raise NotFoundException(message=messages.TASK_NOT_FOUND)
 
+        project = await self.project_repository.get_by_id(task.project_id)
+        if not project:
+            raise NotFoundException(message=messages.PROJECT_NOT_FOUND)
+
+        # OWNER/EDITOR or ADMIN only (VIEWER assignees cannot attach labels)
+        await require_workspace_role(
+            self.workspace_repository,
+            project.workspace_id,
+            current_user,
+            allowed_roles={WorkspaceRole.OWNER, WorkspaceRole.EDITOR},
+            forbidden_message=messages.TASK_EDITOR_REQUIRED,
+        )
+
         label = await self.repository.get_by_id(label_id)
         if not label:
             raise NotFoundException(message=messages.LABEL_NOT_FOUND)
@@ -113,28 +140,10 @@ class LabelService:
         if label.project_id != task.project_id:
             raise BadRequestException(message=messages.LABEL_PROJECT_MISMATCH)
 
-        # Check permission: OWNER/EDITOR or task assignee
-        if current_user.role != UserRole.ADMIN:
-            project = await self.project_repository.get_by_id(task.project_id)
-            if not project:
-                raise NotFoundException(message=messages.PROJECT_NOT_FOUND)
-
-            membership = await self.workspace_repository.get_member(
-                project.workspace_id, current_user.id
-            )
-            if not membership:
-                raise ForbiddenException(message=messages.NOT_WORKSPACE_MEMBER)
-
-            is_assignee = task.assignee_id == current_user.id
-            is_editor_or_owner = membership.role in (
-                WorkspaceRole.OWNER,
-                WorkspaceRole.EDITOR,
-            )
-            if not (is_assignee or is_editor_or_owner):
-                raise ForbiddenException(message=messages.TASK_EDITOR_REQUIRED)
-
-        await self.repository.attach_to_task(task, label)
+        await self.repository.attach_to_task(task_id=task.id, label_id=label.id)
         updated_task = await self.task_repository.get_by_id(task_id)
+        if not updated_task:
+            raise NotFoundException(message=messages.TASK_NOT_FOUND)
         return TaskResponse.model_validate(updated_task)
 
     async def remove_label_from_task(
@@ -145,29 +154,25 @@ class LabelService:
         if not task:
             raise NotFoundException(message=messages.TASK_NOT_FOUND)
 
+        project = await self.project_repository.get_by_id(task.project_id)
+        if not project:
+            raise NotFoundException(message=messages.PROJECT_NOT_FOUND)
+
+        # Check permission: OWNER/EDITOR or ADMIN only
+        await require_workspace_role(
+            self.workspace_repository,
+            project.workspace_id,
+            current_user,
+            allowed_roles={WorkspaceRole.OWNER, WorkspaceRole.EDITOR},
+            forbidden_message=messages.TASK_EDITOR_REQUIRED,
+        )
+
         label = await self.repository.get_by_id(label_id)
         if not label:
             raise NotFoundException(message=messages.LABEL_NOT_FOUND)
 
-        if current_user.role != UserRole.ADMIN:
-            project = await self.project_repository.get_by_id(task.project_id)
-            if not project:
-                raise NotFoundException(message=messages.PROJECT_NOT_FOUND)
-
-            membership = await self.workspace_repository.get_member(
-                project.workspace_id, current_user.id
-            )
-            if not membership:
-                raise ForbiddenException(message=messages.NOT_WORKSPACE_MEMBER)
-
-            is_assignee = task.assignee_id == current_user.id
-            is_editor_or_owner = membership.role in (
-                WorkspaceRole.OWNER,
-                WorkspaceRole.EDITOR,
-            )
-            if not (is_assignee or is_editor_or_owner):
-                raise ForbiddenException(message=messages.TASK_EDITOR_REQUIRED)
-
-        await self.repository.remove_from_task(task, label)
+        await self.repository.remove_from_task(task_id=task.id, label_id=label.id)
         updated_task = await self.task_repository.get_by_id(task_id)
+        if not updated_task:
+            raise NotFoundException(message=messages.TASK_NOT_FOUND)
         return TaskResponse.model_validate(updated_task)

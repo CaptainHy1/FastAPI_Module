@@ -1,10 +1,11 @@
 """Label domain Pydantic schemas."""
 
-from pydantic import Field, field_validator
+from pydantic import Field
 
 from app.core.constants import (
     DEFAULT_LABEL_COLOR,
-    MAX_LABEL_COLOR_LENGTH,
+    LABEL_COLOR_LENGTH,
+    LABEL_COLOR_PATTERN,
     MAX_LABEL_NAME_LENGTH,
     MIN_STRING_LENGTH,
 )
@@ -23,9 +24,9 @@ class LabelBase(AppBaseModel):
     )
     color: str = Field(
         default=DEFAULT_LABEL_COLOR,
-        min_length=MAX_LABEL_COLOR_LENGTH,
-        max_length=MAX_LABEL_COLOR_LENGTH,
-        pattern=r"^#[0-9a-fA-F]{6}$",
+        min_length=LABEL_COLOR_LENGTH,
+        max_length=LABEL_COLOR_LENGTH,
+        pattern=LABEL_COLOR_PATTERN,
         description="Hexadecimal color string (e.g., #007BFF)",
         examples=["#007BFF", "#FF5733"],
     )
@@ -33,14 +34,6 @@ class LabelBase(AppBaseModel):
 
 class LabelCreate(LabelBase):
     """Schema for creating a new label under a project."""
-
-    @field_validator("name", mode="after")
-    @classmethod
-    def validate_name_not_empty(cls, v: str) -> str:
-        """Ensure label name is not blank after whitespace stripping."""
-        if not v.strip():
-            raise ValueError("Label name cannot be empty.")
-        return v.strip()
 
 
 class LabelResponse(LabelBase):
