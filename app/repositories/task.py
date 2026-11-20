@@ -4,7 +4,6 @@ from typing import Any
 
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
 
 from app.core.constants import TaskPriority, TaskStatus
 from app.models.project import Project
@@ -21,8 +20,8 @@ class TaskRepository(BaseRepository[Task, TaskCreate, TaskUpdate]):
         super().__init__(model=Task, db=db)
 
     async def get_by_id(self, id_: Any) -> Task | None:
-        """Retrieve a single task with labels eagerly loaded."""
-        stmt = select(Task).where(Task.id == id_).options(selectinload(Task.labels))
+        """Retrieve a single task with labels loaded via selectin."""
+        stmt = select(Task).where(Task.id == id_)
         result = await self.db.execute(stmt)
         return result.scalars().first()
 
@@ -46,41 +45,57 @@ class TaskRepository(BaseRepository[Task, TaskCreate, TaskUpdate]):
         **kwargs: Any,
     ) -> tuple[list[Task], int]:
         """Filter and paginate tasks using SQLAlchemy async queries."""
-        stmt = select(Task).options(selectinload(Task.labels))
+        stmt = select(Task)
         count_stmt = select(func.count(Task.id)).select_from(Task)
 
-        status_filter: TaskStatus | None = kwargs.get("status")
-        priority_filter: TaskPriority | None = kwargs.get("priority")
+        status_filter: list[TaskStatus] | TaskStatus | None = kwargs.get("status")
+        priority_filter: list[TaskPriority] | TaskPriority | None = kwargs.get(
+            "priority"
+        )
         project_id_filter: int | None = kwargs.get("project_id")
         assignee_id_filter: int | None = kwargs.get("assignee_id")
         search: str | None = kwargs.get("search")
         member_user_id: int | None = kwargs.get("member_user_id")
 
-        if member_user_id is not None:
-            stmt = stmt.join(Project, Task.project_id == Project.id).join(
-                WorkspaceMember,
-                (Project.workspace_id == WorkspaceMember.workspace_id)
-                & (WorkspaceMember.user_id == member_user_id),
-            )
-            count_stmt = count_stmt.join(Project, Task.project_id == Project.id).join(
-                WorkspaceMember,
-                (Project.workspace_id == WorkspaceMember.workspace_id)
-                & (WorkspaceMember.user_id == member_user_id),
-            )
+        conditions: list[Any] = []
 
-        conditions = []
+        if member_user_id is not None:
+            user_projects_subquery = (
+                select(Project.id)
+                .join(
+                    WorkspaceMember,
+                    Project.workspace_id == WorkspaceMember.workspace_id,
+                )
+                .where(WorkspaceMember.user_id == member_user_id)
+            )
+            conditions.append(Task.project_id.in_(user_projects_subquery))
+
         if status_filter is not None:
-            conditions.append(Task.status == status_filter)
+            if isinstance(status_filter, list):
+                if status_filter:
+                    conditions.append(Task.status.in_(status_filter))
+            else:
+                conditions.append(Task.status == status_filter)
         if priority_filter is not None:
-            conditions.append(Task.priority == priority_filter)
+            if isinstance(priority_filter, list):
+                if priority_filter:
+                    conditions.append(Task.priority.in_(priority_filter))
+            else:
+                conditions.append(Task.priority == priority_filter)
         if project_id_filter is not None:
             conditions.append(Task.project_id == project_id_filter)
         if assignee_id_filter is not None:
             conditions.append(Task.assignee_id == assignee_id_filter)
         if search:
-            pattern = f"%{search}%"
+            escaped_search = (
+                search.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            )
+            pattern = f"%{escaped_search}%"
             conditions.append(
-                or_(Task.title.ilike(pattern), Task.description.ilike(pattern))
+                or_(
+                    Task.title.ilike(pattern, escape="\\"),
+                    Task.description.ilike(pattern, escape="\\"),
+                )
             )
 
         if conditions:

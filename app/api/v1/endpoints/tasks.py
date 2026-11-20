@@ -5,15 +5,13 @@ from typing import Annotated
 from fastapi import APIRouter, BackgroundTasks, Path, status
 
 from app.core.dependencies import (
-    CommentServiceDep,
     CurrentUser,
-    LabelServiceDep,
     PaginationDep,
     TaskFilterDep,
     TaskServiceDep,
 )
+from app.core.openapi import build_error_responses
 from app.schemas.base import PaginatedResponse
-from app.schemas.comment import CommentCreate, CommentResponse
 from app.schemas.task import TaskCreate, TaskResponse, TaskUpdate
 
 router = APIRouter()
@@ -23,6 +21,13 @@ router = APIRouter()
     "",
     response_model=TaskResponse,
     status_code=status.HTTP_201_CREATED,
+    responses=build_error_responses(
+        status.HTTP_400_BAD_REQUEST,
+        status.HTTP_401_UNAUTHORIZED,
+        status.HTTP_403_FORBIDDEN,
+        status.HTTP_404_NOT_FOUND,
+        status.HTTP_422_UNPROCESSABLE_CONTENT,
+    ),
     summary="Create a new task",
     description=(
         "Creates a new task assigned to a project and returns the created task."
@@ -46,6 +51,7 @@ async def create_task(
     "",
     response_model=PaginatedResponse[TaskResponse],
     status_code=status.HTTP_200_OK,
+    responses=build_error_responses(status.HTTP_401_UNAUTHORIZED),
     summary="List tasks",
     description=(
         "Retrieves a paginated list of tasks with optional filters "
@@ -68,6 +74,11 @@ async def list_tasks(
     "/{task_id}",
     response_model=TaskResponse,
     status_code=status.HTTP_200_OK,
+    responses=build_error_responses(
+        status.HTTP_401_UNAUTHORIZED,
+        status.HTTP_403_FORBIDDEN,
+        status.HTTP_404_NOT_FOUND,
+    ),
     summary="Get task details",
     description="Retrieves details of a single task by its unique ID.",
 )
@@ -84,6 +95,13 @@ async def get_task(
     "/{task_id}",
     response_model=TaskResponse,
     status_code=status.HTTP_200_OK,
+    responses=build_error_responses(
+        status.HTTP_400_BAD_REQUEST,
+        status.HTTP_401_UNAUTHORIZED,
+        status.HTTP_403_FORBIDDEN,
+        status.HTTP_404_NOT_FOUND,
+        status.HTTP_422_UNPROCESSABLE_CONTENT,
+    ),
     summary="Update a task",
     description=(
         "Partially updates an existing task (title, description, status, priority)."
@@ -108,6 +126,11 @@ async def update_task(
 @router.delete(
     "/{task_id}",
     status_code=status.HTTP_204_NO_CONTENT,
+    responses=build_error_responses(
+        status.HTTP_401_UNAUTHORIZED,
+        status.HTTP_403_FORBIDDEN,
+        status.HTTP_404_NOT_FOUND,
+    ),
     summary="Delete a task",
     description="Deletes a task by its ID.",
 )
@@ -118,82 +141,3 @@ async def delete_task(
 ) -> None:
     """Delete task endpoint."""
     await service.delete_task(task_id=task_id, current_user=current_user)
-
-
-# ==============================================================================
-# Task Labels Management
-# ==============================================================================
-@router.post(
-    "/{task_id}/labels/{label_id}",
-    response_model=TaskResponse,
-    status_code=status.HTTP_200_OK,
-    summary="Assign label to task",
-    description="Assigns a project-scoped label to a task.",
-)
-async def attach_label(
-    task_id: Annotated[int, Path(gt=0, description="Task ID")],
-    label_id: Annotated[int, Path(gt=0, description="Label ID")],
-    current_user: CurrentUser,
-    service: LabelServiceDep,
-) -> TaskResponse:
-    """Assign label to task endpoint."""
-    return await service.attach_label_to_task(
-        task_id=task_id, label_id=label_id, current_user=current_user
-    )
-
-
-@router.delete(
-    "/{task_id}/labels/{label_id}",
-    response_model=TaskResponse,
-    status_code=status.HTTP_200_OK,
-    summary="Remove label from task",
-    description="Removes an assigned label from a task.",
-)
-async def remove_label(
-    task_id: Annotated[int, Path(gt=0, description="Task ID")],
-    label_id: Annotated[int, Path(gt=0, description="Label ID")],
-    current_user: CurrentUser,
-    service: LabelServiceDep,
-) -> TaskResponse:
-    """Remove label from task endpoint."""
-    return await service.remove_label_from_task(
-        task_id=task_id, label_id=label_id, current_user=current_user
-    )
-
-
-# ==============================================================================
-# Task Comments Management
-# ==============================================================================
-@router.post(
-    "/{task_id}/comments",
-    response_model=CommentResponse,
-    status_code=status.HTTP_201_CREATED,
-    summary="Add comment to task",
-    description="Adds a new comment to a task (workspace members only).",
-)
-async def create_comment(
-    task_id: Annotated[int, Path(gt=0, description="Task ID")],
-    comment_in: CommentCreate,
-    current_user: CurrentUser,
-    service: CommentServiceDep,
-) -> CommentResponse:
-    """Add comment endpoint."""
-    return await service.create_comment(
-        task_id=task_id, comment_in=comment_in, current_user=current_user
-    )
-
-
-@router.get(
-    "/{task_id}/comments",
-    response_model=list[CommentResponse],
-    status_code=status.HTTP_200_OK,
-    summary="List comments on task",
-    description="Lists all comments on a task chronologically.",
-)
-async def list_comments(
-    task_id: Annotated[int, Path(gt=0, description="Task ID")],
-    current_user: CurrentUser,
-    service: CommentServiceDep,
-) -> list[CommentResponse]:
-    """List comments endpoint."""
-    return await service.list_comments(task_id=task_id, current_user=current_user)

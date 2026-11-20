@@ -5,6 +5,19 @@ Eliminates magic strings across the codebase as required by coding standards.
 
 from enum import StrEnum
 
+
+# ==============================================================================
+# Environment Enumeration
+# ==============================================================================
+class Environment(StrEnum):
+    """Application deployment environment."""
+
+    DEVELOPMENT = "development"
+    TESTING = "testing"
+    STAGING = "staging"
+    PRODUCTION = "production"
+
+
 # ==============================================================================
 # Security & Password Constants
 # ==============================================================================
@@ -98,6 +111,8 @@ MAX_TASK_DESC_LENGTH: int = 2000
 
 MAX_LABEL_NAME_LENGTH: int = 50
 MAX_LABEL_COLOR_LENGTH: int = 7
+LABEL_COLOR_LENGTH: int = 7
+LABEL_COLOR_PATTERN: str = r"^#[0-9a-fA-F]{6}$"
 DEFAULT_LABEL_COLOR: str = "#007BFF"
 
 MAX_COMMENT_LENGTH: int = 2000
@@ -110,7 +125,13 @@ PG_FOREIGN_KEY_VIOLATION: str = "23503"
 # Redis Caching & Middleware Constants
 # ==============================================================================
 DEFAULT_CACHE_TTL_SECONDS: int = 60
-PROJECT_TASKS_CACHE_PREFIX: str = "project"
-PROJECT_TASKS_CACHE_RESOURCE: str = "tasks"
+CACHE_SCHEMA_VERSION: str = "v1"
+CACHE_KEY_DIGEST_LENGTH: int = 16
+REDIS_SOCKET_TIMEOUT: float = 2.0
+REDIS_CONNECT_TIMEOUT: float = 2.0
+CIRCUIT_BREAKER_COOLDOWN_SECONDS: float = 5.0
+
 HEADER_REQUEST_ID: str = "X-Request-ID"
 HEADER_PROCESS_TIME: str = "X-Process-Time"
+REQUEST_ID_MAX_LENGTH: int = 64
+REQUEST_ID_PATTERN: str = r"^[a-zA-Z0-9_\-\.]{1,64}$"

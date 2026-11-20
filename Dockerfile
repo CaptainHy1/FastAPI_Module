@@ -14,9 +14,11 @@ RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
 COPY pyproject.toml README.md ./
-COPY app ./app
 
-RUN pip install --upgrade pip && pip install .
+# Install dependencies from pyproject.toml before copying application source code
+RUN pip install --upgrade pip && \
+    python -c "import tomllib; f=open('pyproject.toml', 'rb'); [print(d) for d in tomllib.load(f)['project']['dependencies']]" > requirements.txt && \
+    pip install -r requirements.txt
 
 # ==============================================================================
 # Stage 2: Runtime — minimal non-root production image

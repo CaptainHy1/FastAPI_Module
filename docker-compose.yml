@@ -48,7 +48,7 @@ services:
       ENVIRONMENT: ${ENVIRONMENT:-development}
       DEBUG: ${DEBUG:-false}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
-      SECRET_KEY: ${SECRET_KEY:-taskhub-docker-dev-secret-key-min-32-characters}
+      SECRET_KEY: ${SECRET_KEY:?SECRET_KEY is required}
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-taskhub_dev}
       DB_ECHO: ${DB_ECHO:-false}
       REDIS_URL: redis://redis:6379/0
@@ -59,18 +59,6 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-    healthcheck:
-      test:
-        [
-          "CMD",
-          "python",
-          "-c",
-          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health')",
-        ]
-      interval: 15s
-      timeout: 5s
-      start_period: 20s
-      retries: 3
 
 volumes:
   postgres_data:

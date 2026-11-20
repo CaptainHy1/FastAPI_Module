@@ -106,7 +106,7 @@ def get_task_service(
     user_repo: Annotated[UserRepository, Depends(get_user_repository)],
     cache: Annotated[CacheManager, Depends(get_cache_manager)],
 ) -> TaskService:
-    """Dependency provider for TaskService with RBAC and Redis caching."""
+    """Dependency provider for TaskService with RBAC and CacheManager."""
     return TaskService(
         repository=repo,
         project_repository=project_repo,
@@ -123,7 +123,7 @@ def get_label_service(
     workspace_repo: Annotated[WorkspaceRepository, Depends(get_workspace_repository)],
     cache: Annotated[CacheManager, Depends(get_cache_manager)],
 ) -> LabelService:
-    """Dependency provider for LabelService with Redis cache invalidation."""
+    """Dependency provider for LabelService."""
     return LabelService(
         repository=repo,
         project_repository=project_repo,
@@ -218,10 +218,10 @@ def get_pagination_params(
 
 def get_task_filter_params(
     status: Annotated[
-        TaskStatus | None, Query(description="Filter by task status")
+        list[TaskStatus] | None, Query(description="Filter by task status")
     ] = None,
     priority: Annotated[
-        TaskPriority | None, Query(description="Filter by task priority")
+        list[TaskPriority] | None, Query(description="Filter by task priority")
     ] = None,
     project_id_filter: Annotated[
         int | None, Query(alias="project_id", gt=0, description="Filter by project ID")

@@ -4,6 +4,7 @@ from fastapi import APIRouter, status
 
 from app.core import messages
 from app.core.dependencies import AuthServiceDep
+from app.core.openapi import build_error_responses
 from app.schemas.auth import (
     LoginRequest,
     LogoutRequest,
@@ -21,6 +22,11 @@ router = APIRouter()
     "/register",
     response_model=UserResponse,
     status_code=status.HTTP_201_CREATED,
+    responses=build_error_responses(
+        status.HTTP_400_BAD_REQUEST,
+        status.HTTP_409_CONFLICT,
+        status.HTTP_422_UNPROCESSABLE_CONTENT,
+    ),
     summary="Register a new user",
     description=(
         "Creates a new MEMBER account. Role cannot be chosen by the client. "
@@ -39,6 +45,10 @@ async def register(
     "/login",
     response_model=TokenResponse,
     status_code=status.HTTP_200_OK,
+    responses=build_error_responses(
+        status.HTTP_401_UNAUTHORIZED,
+        status.HTTP_422_UNPROCESSABLE_CONTENT,
+    ),
     summary="User login",
     description="Authenticates credentials and issues JWT access and refresh tokens.",
 )
@@ -54,6 +64,10 @@ async def login(
     "/refresh",
     response_model=TokenResponse,
     status_code=status.HTTP_200_OK,
+    responses=build_error_responses(
+        status.HTTP_401_UNAUTHORIZED,
+        status.HTTP_422_UNPROCESSABLE_CONTENT,
+    ),
     summary="Rotate refresh token",
     description=(
         "Atomically revokes the current refresh token and issues a new token pair. "
@@ -72,6 +86,10 @@ async def refresh_token(
     "/logout",
     response_model=MessageResponse,
     status_code=status.HTTP_200_OK,
+    responses=build_error_responses(
+        status.HTTP_401_UNAUTHORIZED,
+        status.HTTP_422_UNPROCESSABLE_CONTENT,
+    ),
     summary="Logout user",
     description="Revokes the provided refresh token.",
 )
@@ -82,4 +100,3 @@ async def logout(
     """Logout user endpoint."""
     await service.logout(payload)
     return MessageResponse(message=messages.LOGOUT_SUCCESS)
-

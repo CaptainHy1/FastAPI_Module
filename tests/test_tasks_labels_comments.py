@@ -96,12 +96,13 @@ async def test_labels_crud_and_rbac(async_client: AsyncClient) -> None:
     assert dup_lbl.status_code == 409
     assert dup_lbl.json()["error"]["message"] == messages.LABEL_ALREADY_EXISTS
 
-    # Viewer can list labels -> 200
+    # Viewer can list labels -> 200 (PaginatedResponse)
     list_res = await async_client.get(
         f"/api/v1/projects/{proj_id}/labels", headers=viewer_hdrs
     )
     assert list_res.status_code == 200
-    assert len(list_res.json()) == 1
+    assert list_res.json()["total"] == 1
+    assert len(list_res.json()["items"]) == 1
 
     # Viewer cannot delete label -> 403
     del_vw = await async_client.delete(
@@ -205,6 +206,41 @@ async def test_task_label_attach_and_detach(async_client: AsyncClient) -> None:
     assert detach_res.status_code == 200
     assert len(detach_res.json()["labels"]) == 0
 
+    # Detach unattached label -> 404 (Item 4)
+    del_unattached = await async_client.delete(
+        f"/api/v1/tasks/{task_p1['id']}/labels/{lbl_p1['id']}",
+        headers=owner_hdrs,
+    )
+    assert del_unattached.status_code == 404
+    assert del_unattached.json()["error"]["message"] == messages.LABEL_NOT_ATTACHED
+
+    # Assignee with only VIEWER role cannot attach/detach label -> 403 (Item 5)
+    viewer_user_hdrs = await _register_user(
+        async_client, "viewer_assignee@taskhub.dev", "ViewerAssignee"
+    )
+    viewer_id = (
+        await async_client.get("/api/v1/users/me", headers=viewer_user_hdrs)
+    ).json()["id"]
+    await async_client.post(
+        f"/api/v1/workspaces/{ws['id']}/members",
+        json={"user_id": viewer_id, "role": WorkspaceRole.VIEWER},
+        headers=owner_hdrs,
+    )
+    task_for_viewer = (
+        await async_client.post(
+            f"/api/v1/projects/{p1['id']}/tasks",
+            json={"title": "Viewer Assigned Task", "assignee_id": viewer_id},
+            headers=owner_hdrs,
+        )
+    ).json()
+
+    vw_attach = await async_client.post(
+        f"/api/v1/tasks/{task_for_viewer['id']}/labels/{lbl_p1['id']}",
+        headers=viewer_user_hdrs,
+    )
+    assert vw_attach.status_code == 403
+    assert vw_attach.json()["error"]["message"] == messages.TASK_EDITOR_REQUIRED
+
 
 @pytest.mark.asyncio
 async def test_comments_crud_and_rbac(async_client: AsyncClient) -> None:
@@ -272,12 +308,13 @@ async def test_comments_crud_and_rbac(async_client: AsyncClient) -> None:
     )
     assert blank_cmt.status_code == 422
 
-    # List comments -> 200
+    # List comments -> 200 (PaginatedResponse)
     list_cmt = await async_client.get(
         f"/api/v1/tasks/{task['id']}/comments", headers=owner_hdrs
     )
     assert list_cmt.status_code == 200
-    assert len(list_cmt.json()) == 1
+    assert list_cmt.json()["total"] == 1
+    assert len(list_cmt.json()["items"]) == 1
 
     # Another member cannot delete this comment -> 403
     del_other = await async_client.delete(
@@ -341,8 +378,7 @@ async def test_task_assignment_validation_and_status_transitions(
     )
     assert bad_assign.status_code == 422
     assert (
-        bad_assign.json()["error"]["message"]
-        == messages.ASSIGNEE_NOT_WORKSPACE_MEMBER
+        bad_assign.json()["error"]["message"] == messages.ASSIGNEE_NOT_WORKSPACE_MEMBER
     )
 
     # Assign to valid member -> 201
@@ -379,11 +415,27 @@ async def test_task_assignment_validation_and_status_transitions(
     assert s2.status_code == 200
     assert s2.json()["status"] == TaskStatus.DONE
 
-    # Advanced filtering on GET /projects/{id}/tasks
+    # Advanced filtering on GET /projects/{id}/tasks with multiple statuses
     filter_res = await async_client.get(
-        f"/api/v1/projects/{proj['id']}/tasks?status=DONE&priority=HIGH&assignee_id={mem_id}",
+        f"/api/v1/projects/{proj['id']}/tasks?status=DONE&status=IN_PROGRESS&priority=HIGH&assignee_id={mem_id}",
         headers=member_hdrs,
     )
     assert filter_res.status_code == 200
     assert filter_res.json()["total"] == 1
     assert filter_res.json()["items"][0]["id"] == task["id"]
+
+    # Filter with non-matching status list
+    filter_res_empty = await async_client.get(
+        f"/api/v1/projects/{proj['id']}/tasks?status=TODO",
+        headers=member_hdrs,
+    )
+    assert filter_res_empty.status_code == 200
+    assert filter_res_empty.json()["total"] == 0
+
+    # Search with special characters test
+    search_res = await async_client.get(
+        f"/api/v1/projects/{proj['id']}/tasks?search=Valid%20Task",
+        headers=member_hdrs,
+    )
+    assert search_res.status_code == 200
+    assert search_res.json()["total"] == 1

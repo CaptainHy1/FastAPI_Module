@@ -1,7 +1,5 @@
-"""Tests for Day 6: Redis caching, invalidation, background tasks, and middleware."""
+"""Tests for Day 6: Redis caching, versioned invalidation, and middleware."""
 
-import fnmatch
-from collections.abc import AsyncIterator
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -10,17 +8,22 @@ from httpx import AsyncClient
 from redis.exceptions import RedisError
 
 from app.core.cache import cache_manager
-from app.core.constants import HEADER_PROCESS_TIME, HEADER_REQUEST_ID, WorkspaceRole
+from app.core.constants import (
+    HEADER_PROCESS_TIME,
+    HEADER_REQUEST_ID,
+    WorkspaceRole,
+)
 from app.services import task as task_service_module
 
 
 class FakeRedis:
-    """Minimal in-memory async Redis stub for deterministic cache testing."""
+    """In-memory async Redis stub with versioned keys for deterministic tests."""
 
     def __init__(self, fail_on_ops: bool = False) -> None:
         self.store: dict[str, str] = {}
         self.get_calls: int = 0
         self.set_calls: int = 0
+        self.incr_calls: int = 0
         self.delete_calls: int = 0
         self.fail_on_ops = fail_on_ops
 
@@ -37,12 +40,18 @@ class FakeRedis:
         self.store[key] = value
         return True
 
-    async def scan_iter(self, match: str = "*") -> AsyncIterator[str]:
+    async def incr(self, key: str) -> int:
+        self.incr_calls += 1
         if self.fail_on_ops:
             raise RedisError("Redis unavailable")
-        for key in list(self.store.keys()):
-            if fnmatch.fnmatch(key, match):
-                yield key
+        current = int(self.store.get(key, 0)) + 1
+        self.store[key] = str(current)
+        return current
+
+    async def expire(self, key: str, time: int) -> bool:
+        if self.fail_on_ops:
+            raise RedisError("Redis unavailable")
+        return True
 
     async def delete(self, *keys: str) -> int:
         self.delete_calls += 1
@@ -93,7 +102,7 @@ async def test_project_tasks_redis_cache_hit_miss_and_invalidation(
     admin_auth_headers: dict[str, str],
     fake_redis: FakeRedis,
 ) -> None:
-    """Verify cache populate on MISS, reuse on HIT, and invalidation on mutations."""
+    """Verify cache MISS/HIT and O(1) version invalidation on mutations."""
     # Seed initial task
     create_res = await async_client.post(
         "/api/v1/projects/1/tasks",
@@ -103,24 +112,23 @@ async def test_project_tasks_redis_cache_hit_miss_and_invalidation(
     assert create_res.status_code == 201
     task_id = create_res.json()["id"]
 
-    # First GET -> Cache MISS -> stored in Redis
+    # First GET -> Cache MISS -> stored in Redis under version 1
     res1 = await async_client.get(
         "/api/v1/projects/1/tasks", headers=admin_auth_headers
     )
     assert res1.status_code == 200
     assert res1.json()["total"] == 1
-    assert fake_redis.get_calls == 1
+    assert fake_redis.get_calls >= 1
     assert fake_redis.set_calls == 1
-    assert len(fake_redis.store) == 1
 
     # Second GET -> Cache HIT -> no additional SET
+    previous_sets = fake_redis.set_calls
     res2 = await async_client.get(
         "/api/v1/projects/1/tasks", headers=admin_auth_headers
     )
     assert res2.status_code == 200
     assert res2.json()["total"] == 1
-    assert fake_redis.get_calls == 2
-    assert fake_redis.set_calls == 1
+    assert fake_redis.set_calls == previous_sets
 
     # Unauthorized non-member must still receive 403 even when cache is warm
     _, outsider_headers = await _register_and_login(
@@ -131,35 +139,34 @@ async def test_project_tasks_redis_cache_hit_miss_and_invalidation(
     )
     assert res_forbidden.status_code == 403
 
-    # Creating a new task invalidates cache
+    # Creating a new task increments project version (O(1) invalidation)
+    v_before = int(fake_redis.store.get("project:1:tasks:ver", 0))
     create_res2 = await async_client.post(
         "/api/v1/projects/1/tasks",
         json={"title": "Cached Task 2"},
         headers=admin_auth_headers,
     )
     assert create_res2.status_code == 201
-    assert len(fake_redis.store) == 0
+    assert int(fake_redis.store.get("project:1:tasks:ver", 0)) > v_before
 
-    # Next GET repopulates cache with updated total=2
+    # Next GET misses the old version, fetches from DB, returns total=2, caches under v2
     res3 = await async_client.get(
         "/api/v1/projects/1/tasks", headers=admin_auth_headers
     )
     assert res3.status_code == 200
     assert res3.json()["total"] == 2
-    assert len(fake_redis.store) == 1
 
-    # Updating task invalidates cache
+    # Updating task increments version again
     patch_res = await async_client.patch(
         f"/api/v1/tasks/{task_id}",
         json={"title": "Updated Cached Task"},
         headers=admin_auth_headers,
     )
     assert patch_res.status_code == 200
-    assert len(fake_redis.store) == 0
+    assert fake_redis.store.get("project:1:tasks:ver") == "3"
 
-    # Repopulate then attach label -> invalidates cache
+    # Repopulate then attach label -> increments version
     await async_client.get("/api/v1/projects/1/tasks", headers=admin_auth_headers)
-    assert len(fake_redis.store) == 1
     lbl = (
         await async_client.post(
             "/api/v1/projects/1/labels",
@@ -172,16 +179,15 @@ async def test_project_tasks_redis_cache_hit_miss_and_invalidation(
         headers=admin_auth_headers,
     )
     assert attach.status_code == 200
-    assert len(fake_redis.store) == 0
+    assert fake_redis.store.get("project:1:tasks:ver") == "4"
 
-    # Repopulate then delete task -> invalidates cache
+    # Repopulate then delete task -> increments version
     await async_client.get("/api/v1/projects/1/tasks", headers=admin_auth_headers)
-    assert len(fake_redis.store) == 1
     del_res = await async_client.delete(
         f"/api/v1/tasks/{task_id}", headers=admin_auth_headers
     )
     assert del_res.status_code == 204
-    assert len(fake_redis.store) == 0
+    assert fake_redis.store.get("project:1:tasks:ver") == "5"
 
 
 @pytest.mark.asyncio
@@ -203,17 +209,81 @@ async def test_redis_fail_open_when_unavailable(
 
 
 @pytest.mark.asyncio
+async def test_cache_payload_schema_mismatch_fallback(
+    async_client: AsyncClient,
+    admin_auth_headers: dict[str, str],
+    fake_redis: FakeRedis,
+) -> None:
+    """Malformed cache payloads fail open as cache miss instead of 500."""
+    ver = await cache_manager.get_project_version(1)
+    bad_key = cache_manager.build_project_tasks_key(
+        project_id=1,
+        version=ver,
+        page=1,
+        page_size=10,
+    )
+    # Store corrupted schema missing required 'items', 'total', etc.
+    fake_redis.store[bad_key] = '{"invalid_structure": 12345}'
+
+    res = await async_client.get("/api/v1/projects/1/tasks", headers=admin_auth_headers)
+    assert res.status_code == 200
+    assert "items" in res.json()
+    assert "total" in res.json()
+
+
+@pytest.mark.asyncio
+async def test_tasks_list_workspace_isolation_for_outsider(
+    async_client: AsyncClient,
+) -> None:
+    """Outsiders calling GET /api/v1/tasks without project_id see 0 tasks."""
+    _, owner_headers = await _register_and_login(
+        async_client, "ws_owner_isolation@taskhub.dev", "Owner"
+    )
+    _, outsider_headers = await _register_and_login(
+        async_client, "ws_outsider_isolation@taskhub.dev", "Outsider"
+    )
+
+    ws = (
+        await async_client.post(
+            "/api/v1/workspaces",
+            json={"name": "Secret WS"},
+            headers=owner_headers,
+        )
+    ).json()
+
+    proj = (
+        await async_client.post(
+            f"/api/v1/workspaces/{ws['id']}/projects",
+            json={"name": "Secret Project"},
+            headers=owner_headers,
+        )
+    ).json()
+
+    await async_client.post(
+        f"/api/v1/projects/{proj['id']}/tasks",
+        json={"title": "Top Secret Task"},
+        headers=owner_headers,
+    )
+
+    # Outsider lists all tasks without project_id filter
+    outsider_list = await async_client.get("/api/v1/tasks", headers=outsider_headers)
+    assert outsider_list.status_code == 200
+    assert outsider_list.json()["total"] == 0
+    assert outsider_list.json()["items"] == []
+
+
+@pytest.mark.asyncio
 async def test_background_task_notification_on_task_assignment(
     async_client: AsyncClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Background task notifies assignee on create/reassign, not on other edits."""
+    """Background task notifies assignee with non-PII primitives only."""
     mock_notify = MagicMock()
     monkeypatch.setattr(
         task_service_module, "send_task_assigned_notification", mock_notify
     )
 
-    _, owner_headers = await _register_and_login(
+    owner_id, owner_headers = await _register_and_login(
         async_client, "bg_owner@taskhub.dev", "Owner"
     )
     member_id, _ = await _register_and_login(
@@ -240,7 +310,7 @@ async def test_background_task_notification_on_task_assignment(
         )
     ).json()
 
-    # 1. Creating task WITH assignee_id triggers notification once
+    # 1. Creating task WITH assignee_id triggers notification once with primitive IDs
     res_create = await async_client.post(
         f"/api/v1/projects/{proj['id']}/tasks",
         json={"title": "Assigned on Create", "assignee_id": member_id},
@@ -249,8 +319,10 @@ async def test_background_task_notification_on_task_assignment(
     assert res_create.status_code == 201
     task_id = res_create.json()["id"]
     assert mock_notify.call_count == 1
-    assert mock_notify.call_args.kwargs["recipient_email"] == "bg_member@taskhub.dev"
+    assert mock_notify.call_args.kwargs["recipient_id"] == member_id
     assert mock_notify.call_args.kwargs["task_id"] == task_id
+    assert mock_notify.call_args.kwargs["project_id"] == proj["id"]
+    assert mock_notify.call_args.kwargs["assigned_by_id"] == owner_id
 
     # 2. Updating title only (assignee unchanged) does NOT re-trigger notification
     res_patch_title = await async_client.patch(
@@ -279,11 +351,12 @@ async def test_background_task_notification_on_task_assignment(
     assert res_assign.status_code == 200
     assert mock_notify.call_count == 2
     assert mock_notify.call_args.kwargs["task_id"] == task_id2
+    assert mock_notify.call_args.kwargs["recipient_id"] == member_id
 
 
 @pytest.mark.asyncio
 async def test_request_logging_middleware_headers(async_client: AsyncClient) -> None:
-    """Middleware injects X-Request-ID and X-Process-Time and preserves incoming ID."""
+    """Middleware injects X-Request-ID/X-Process-Time and preserves valid ID."""
     res1 = await async_client.get("/api/v1/health")
     assert res1.status_code == 200
     assert HEADER_REQUEST_ID in res1.headers
@@ -297,3 +370,28 @@ async def test_request_logging_middleware_headers(async_client: AsyncClient) -> 
     )
     assert res2.status_code == 200
     assert res2.headers[HEADER_REQUEST_ID] == custom_id
+
+
+@pytest.mark.asyncio
+async def test_request_logging_crlf_and_invalid_request_id(
+    async_client: AsyncClient,
+) -> None:
+    """Middleware rejects CRLF and overlong IDs, replacing with fresh UUID."""
+    # Attempt CRLF injection
+    crlf_id = "malicious-id\r\nInjected-Header: evil"
+    res_crlf = await async_client.get(
+        "/api/v1/health", headers={HEADER_REQUEST_ID: crlf_id}
+    )
+    assert res_crlf.status_code == 200
+    # Must NOT return the injected CRLF header value
+    assert res_crlf.headers[HEADER_REQUEST_ID] != crlf_id
+    assert len(res_crlf.headers[HEADER_REQUEST_ID]) >= 32
+
+    # Overlong ID > 64 chars
+    long_id = "a" * 100
+    res_long = await async_client.get(
+        "/api/v1/health", headers={HEADER_REQUEST_ID: long_id}
+    )
+    assert res_long.status_code == 200
+    assert res_long.headers[HEADER_REQUEST_ID] != long_id
+    assert len(res_long.headers[HEADER_REQUEST_ID]) >= 32

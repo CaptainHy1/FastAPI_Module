@@ -114,4 +114,3 @@ class MessageResponse(AppBaseModel):
     """Generic status message response."""
 
     message: str
-
