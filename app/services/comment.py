@@ -1,14 +1,19 @@
 """Comment business logic service layer."""
 
+import math
+
 from app.core import messages
 from app.core.constants import UserRole, WorkspaceRole
 from app.core.exceptions import ForbiddenException, NotFoundException
+from app.models.task import Comment
 from app.models.user import User
 from app.repositories.comment import CommentRepository
 from app.repositories.project import ProjectRepository
 from app.repositories.task import TaskRepository
 from app.repositories.workspace import WorkspaceRepository
+from app.schemas.base import PaginatedResponse, PaginationParams
 from app.schemas.comment import CommentCreate, CommentResponse
+from app.services.workspace import require_workspace_role
 
 
 class CommentService:
@@ -26,6 +31,19 @@ class CommentService:
         self.project_repository = project_repository
         self.workspace_repository = workspace_repository
 
+    @staticmethod
+    def _to_response(comment: Comment) -> CommentResponse:
+        """DRY helper mapping Comment ORM to CommentResponse schema."""
+        return CommentResponse(
+            id=comment.id,
+            task_id=comment.task_id,
+            author_id=comment.author_id,
+            content=comment.content,
+            created_at=comment.created_at,
+            author_name=comment.author.full_name if comment.author else None,
+            author_email=comment.author.email if comment.author else None,
+        )
+
     async def _verify_task_access(self, task_id: int, user: User) -> tuple[int, int]:
         """Verify task access and return (workspace_id, project_id)."""
         task = await self.task_repository.get_by_id(task_id)
@@ -36,12 +54,13 @@ class CommentService:
         if not project:
             raise NotFoundException(message=messages.PROJECT_NOT_FOUND)
 
-        if user.role != UserRole.ADMIN:
-            membership = await self.workspace_repository.get_member(
-                project.workspace_id, user.id
-            )
-            if not membership:
-                raise ForbiddenException(message=messages.NOT_WORKSPACE_MEMBER)
+        await require_workspace_role(
+            self.workspace_repository,
+            project.workspace_id,
+            user,
+            allowed_roles=None,
+            forbidden_message=messages.NOT_WORKSPACE_MEMBER,
+        )
 
         return project.workspace_id, task.project_id
 
@@ -55,34 +74,29 @@ class CommentService:
             author_id=current_user.id,
             content=comment_in.content,
         )
-        return CommentResponse(
-            id=comment.id,
-            task_id=comment.task_id,
-            author_id=comment.author_id,
-            content=comment.content,
-            created_at=comment.created_at,
-            author_name=comment.author.full_name if comment.author else None,
-            author_email=comment.author.email if comment.author else None,
-        )
+        return self._to_response(comment)
 
     async def list_comments(
-        self, task_id: int, current_user: User
-    ) -> list[CommentResponse]:
+        self,
+        task_id: int,
+        current_user: User,
+        pagination: PaginationParams,
+    ) -> PaginatedResponse[CommentResponse]:
         """List comments for a task (workspace members or ADMIN)."""
         await self._verify_task_access(task_id=task_id, user=current_user)
-        comments = await self.repository.list_by_task(task_id)
-        return [
-            CommentResponse(
-                id=c.id,
-                task_id=c.task_id,
-                author_id=c.author_id,
-                content=c.content,
-                created_at=c.created_at,
-                author_name=c.author.full_name if c.author else None,
-                author_email=c.author.email if c.author else None,
-            )
-            for c in comments
-        ]
+        items, total = await self.repository.list_by_task(
+            task_id=task_id,
+            skip=pagination.skip,
+            limit=pagination.limit,
+        )
+        total_pages = math.ceil(total / pagination.page_size) if total > 0 else 0
+        return PaginatedResponse(
+            items=[self._to_response(c) for c in items],
+            total=total,
+            page=pagination.page,
+            page_size=pagination.page_size,
+            total_pages=total_pages,
+        )
 
     async def delete_comment(self, comment_id: int, current_user: User) -> None:
         """Delete a comment (only author or workspace owner or ADMIN)."""

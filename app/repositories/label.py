@@ -1,13 +1,12 @@
 """Label repository layer."""
 
-from sqlalchemy import select
+from sqlalchemy import CursorResult, delete, func, insert, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
 
 from app.core import messages
-from app.core.exceptions import ConflictException
-from app.models.task import Label, Task
+from app.core.exceptions import ConflictException, NotFoundException
+from app.models.task import Label, task_labels
 from app.repositories.base import BaseRepository
 from app.schemas.label import LabelCreate
 
@@ -19,14 +18,7 @@ class LabelRepository(BaseRepository[Label, LabelCreate, LabelCreate]):
         super().__init__(Label, db)
 
     async def create_label(self, project_id: int, name: str, color: str) -> Label:
-        """Create a new label under a project, preventing duplicate names."""
-        existing_stmt = select(Label).where(
-            Label.project_id == project_id, Label.name == name
-        )
-        existing = await self.db.execute(existing_stmt)
-        if existing.scalars().first():
-            raise ConflictException(message=messages.LABEL_ALREADY_EXISTS)
-
+        """Create a new label under a project, enforcing DB unique constraint."""
         label = Label(project_id=project_id, name=name, color=color)
         self.db.add(label)
         try:
@@ -37,39 +29,55 @@ class LabelRepository(BaseRepository[Label, LabelCreate, LabelCreate]):
             await self.db.rollback()
             raise ConflictException(message=messages.LABEL_ALREADY_EXISTS) from exc
 
-    async def list_by_project(self, project_id: int) -> list[Label]:
-        """List all labels defined within a project."""
+    async def list_by_project(
+        self,
+        project_id: int,
+        skip: int = 0,
+        limit: int = 10,
+    ) -> tuple[list[Label], int]:
+        """List labels defined within a project with deterministic ordering."""
         stmt = (
             select(Label)
             .where(Label.project_id == project_id)
-            .order_by(Label.name.asc())
+            .order_by(Label.name.asc(), Label.id.asc())
+            .offset(skip)
+            .limit(limit)
+        )
+        count_stmt = (
+            select(func.count(Label.id))
+            .select_from(Label)
+            .where(Label.project_id == project_id)
+        )
+        total_result = await self.db.execute(count_stmt)
+        total = int(total_result.scalar_one())
+
+        result = await self.db.execute(stmt)
+        items = list(result.scalars().all())
+        return items, total
+
+    async def attach_to_task(self, task_id: int, label_id: int) -> None:
+        """Attach a label to a task, enforcing single assignment via primary key."""
+        stmt = insert(task_labels).values(task_id=task_id, label_id=label_id)
+        try:
+            await self.db.execute(stmt)
+            await self.db.commit()
+            self.db.expire_all()
+        except IntegrityError as exc:
+            await self.db.rollback()
+            raise ConflictException(message=messages.LABEL_ALREADY_ATTACHED) from exc
+
+    async def remove_from_task(self, task_id: int, label_id: int) -> None:
+        """Remove a label from a task; raise NotFoundException if not attached."""
+        stmt = (
+            delete(task_labels)
+            .where(
+                (task_labels.c.task_id == task_id)
+                & (task_labels.c.label_id == label_id)
+            )
         )
         result = await self.db.execute(stmt)
-        return list(result.scalars().all())
-
-    async def attach_to_task(self, task: Task, label: Label) -> None:
-        """Attach a label to a task, enforcing single assignment."""
-        # Ensure labels are loaded
-        stmt = select(Task).where(Task.id == task.id).options(selectinload(Task.labels))
-        refreshed_task = (await self.db.execute(stmt)).scalar_one()
-
-        if any(existing.id == label.id for existing in refreshed_task.labels):
-            raise ConflictException(message=messages.LABEL_ALREADY_ATTACHED)
-
-        refreshed_task.labels.append(label)
+        rowcount = result.rowcount if isinstance(result, CursorResult) else 0
+        if rowcount == 0:
+            raise NotFoundException(message=messages.LABEL_NOT_ATTACHED)
         await self.db.commit()
-
-    async def remove_from_task(self, task: Task, label: Label) -> None:
-        """Remove a label from a task."""
-        stmt = select(Task).where(Task.id == task.id).options(selectinload(Task.labels))
-        refreshed_task = (await self.db.execute(stmt)).scalar_one()
-
-        target = next(
-            (item for item in refreshed_task.labels if item.id == label.id),
-            None,
-        )
-        if not target:
-            raise ConflictException(message=messages.LABEL_NOT_ATTACHED)
-
-        refreshed_task.labels.remove(target)
-        await self.db.commit()
+        self.db.expire_all()

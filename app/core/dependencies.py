@@ -218,10 +218,10 @@ def get_pagination_params(
 
 def get_task_filter_params(
     status: Annotated[
-        TaskStatus | None, Query(description="Filter by task status")
+        list[TaskStatus] | None, Query(description="Filter by task status")
     ] = None,
     priority: Annotated[
-        TaskPriority | None, Query(description="Filter by task priority")
+        list[TaskPriority] | None, Query(description="Filter by task priority")
     ] = None,
     project_id_filter: Annotated[
         int | None, Query(alias="project_id", gt=0, description="Filter by project ID")
