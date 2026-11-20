@@ -9,6 +9,7 @@ from app.core.dependencies import (
     CurrentUser,
     PaginationDep,
 )
+from app.core.openapi import build_error_responses
 from app.schemas.base import PaginatedResponse
 from app.schemas.comment import CommentCreate, CommentResponse
 
@@ -19,6 +20,12 @@ router = APIRouter()
     "/tasks/{task_id}/comments",
     response_model=CommentResponse,
     status_code=status.HTTP_201_CREATED,
+    responses=build_error_responses(
+        status.HTTP_401_UNAUTHORIZED,
+        status.HTTP_403_FORBIDDEN,
+        status.HTTP_404_NOT_FOUND,
+        status.HTTP_422_UNPROCESSABLE_CONTENT,
+    ),
     summary="Add comment to task",
     description="Adds a new comment to a task (workspace members only).",
 )
@@ -38,6 +45,11 @@ async def create_comment(
     "/tasks/{task_id}/comments",
     response_model=PaginatedResponse[CommentResponse],
     status_code=status.HTTP_200_OK,
+    responses=build_error_responses(
+        status.HTTP_401_UNAUTHORIZED,
+        status.HTTP_403_FORBIDDEN,
+        status.HTTP_404_NOT_FOUND,
+    ),
     summary="List comments on task",
     description="Lists all comments on a task chronologically with pagination.",
 )
@@ -56,6 +68,11 @@ async def list_comments(
 @router.delete(
     "/comments/{comment_id}",
     status_code=status.HTTP_204_NO_CONTENT,
+    responses=build_error_responses(
+        status.HTTP_401_UNAUTHORIZED,
+        status.HTTP_403_FORBIDDEN,
+        status.HTTP_404_NOT_FOUND,
+    ),
     summary="Delete a comment",
     description="Deletes a task comment (author or workspace owner only).",
 )

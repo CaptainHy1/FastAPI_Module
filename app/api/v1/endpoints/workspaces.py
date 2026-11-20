@@ -11,6 +11,7 @@ from app.core.dependencies import (
     ProjectServiceDep,
     WorkspaceServiceDep,
 )
+from app.core.openapi import build_error_responses
 from app.schemas.base import PaginatedResponse
 from app.schemas.project import ProjectCreate, ProjectResponse
 from app.schemas.workspace import (
@@ -28,6 +29,10 @@ router = APIRouter()
     "",
     response_model=WorkspaceResponse,
     status_code=status.HTTP_201_CREATED,
+    responses=build_error_responses(
+        status.HTTP_401_UNAUTHORIZED,
+        status.HTTP_422_UNPROCESSABLE_CONTENT,
+    ),
     summary="Create workspace",
     description="Creates a new workspace with the authenticated user as OWNER.",
 )
@@ -46,6 +51,7 @@ async def create_workspace(
     "",
     response_model=PaginatedResponse[WorkspaceResponse],
     status_code=status.HTTP_200_OK,
+    responses=build_error_responses(status.HTTP_401_UNAUTHORIZED),
     summary="List workspaces",
     description="Lists workspaces accessible to the authenticated user.",
 )
@@ -64,6 +70,11 @@ async def list_workspaces(
     "/{workspace_id}",
     response_model=WorkspaceResponse,
     status_code=status.HTTP_200_OK,
+    responses=build_error_responses(
+        status.HTTP_401_UNAUTHORIZED,
+        status.HTTP_403_FORBIDDEN,
+        status.HTTP_404_NOT_FOUND,
+    ),
     summary="Get workspace details",
     description="Retrieves workspace details if user is a member or admin.",
 )
@@ -82,6 +93,12 @@ async def get_workspace(
     "/{workspace_id}",
     response_model=WorkspaceResponse,
     status_code=status.HTTP_200_OK,
+    responses=build_error_responses(
+        status.HTTP_401_UNAUTHORIZED,
+        status.HTTP_403_FORBIDDEN,
+        status.HTTP_404_NOT_FOUND,
+        status.HTTP_422_UNPROCESSABLE_CONTENT,
+    ),
     summary="Update workspace",
     description="Updates workspace name (OWNER or ADMIN only).",
 )
@@ -102,6 +119,11 @@ async def update_workspace(
 @router.delete(
     "/{workspace_id}",
     status_code=status.HTTP_204_NO_CONTENT,
+    responses=build_error_responses(
+        status.HTTP_401_UNAUTHORIZED,
+        status.HTTP_403_FORBIDDEN,
+        status.HTTP_404_NOT_FOUND,
+    ),
     summary="Delete workspace",
     description="Deletes a workspace and its resources (OWNER or ADMIN only).",
 )
@@ -121,6 +143,14 @@ async def delete_workspace(
     "/{workspace_id}/members",
     response_model=WorkspaceMemberResponse,
     status_code=status.HTTP_201_CREATED,
+    responses=build_error_responses(
+        status.HTTP_400_BAD_REQUEST,
+        status.HTTP_401_UNAUTHORIZED,
+        status.HTTP_403_FORBIDDEN,
+        status.HTTP_404_NOT_FOUND,
+        status.HTTP_409_CONFLICT,
+        status.HTTP_422_UNPROCESSABLE_CONTENT,
+    ),
     summary="Invite/Add workspace member",
     description="Adds a user to the workspace with a role (OWNER or ADMIN only).",
 )
@@ -142,6 +172,11 @@ async def add_workspace_member(
     "/{workspace_id}/members",
     response_model=list[WorkspaceMemberResponse],
     status_code=status.HTTP_200_OK,
+    responses=build_error_responses(
+        status.HTTP_401_UNAUTHORIZED,
+        status.HTTP_403_FORBIDDEN,
+        status.HTTP_404_NOT_FOUND,
+    ),
     summary="List workspace members",
     description="Lists all members of a workspace (members or ADMIN only).",
 )
@@ -159,6 +194,12 @@ async def list_workspace_members(
 @router.delete(
     "/{workspace_id}/members/{user_id}",
     status_code=status.HTTP_204_NO_CONTENT,
+    responses=build_error_responses(
+        status.HTTP_400_BAD_REQUEST,
+        status.HTTP_401_UNAUTHORIZED,
+        status.HTTP_403_FORBIDDEN,
+        status.HTTP_404_NOT_FOUND,
+    ),
     summary="Remove workspace member",
     description="Removes a member from the workspace (OWNER/ADMIN or self-leave).",
 )
@@ -183,6 +224,12 @@ async def remove_workspace_member(
     "/{workspace_id}/projects",
     response_model=ProjectResponse,
     status_code=status.HTTP_201_CREATED,
+    responses=build_error_responses(
+        status.HTTP_401_UNAUTHORIZED,
+        status.HTTP_403_FORBIDDEN,
+        status.HTTP_404_NOT_FOUND,
+        status.HTTP_422_UNPROCESSABLE_CONTENT,
+    ),
     summary="Create project in workspace",
     description="Creates a project within a workspace (OWNER/EDITOR or ADMIN only).",
 )
@@ -204,6 +251,11 @@ async def create_project_in_workspace(
     "/{workspace_id}/projects",
     response_model=PaginatedResponse[ProjectResponse],
     status_code=status.HTTP_200_OK,
+    responses=build_error_responses(
+        status.HTTP_401_UNAUTHORIZED,
+        status.HTTP_403_FORBIDDEN,
+        status.HTTP_404_NOT_FOUND,
+    ),
     summary="List projects in workspace",
     description="Lists projects within a workspace with optional status filter.",
 )

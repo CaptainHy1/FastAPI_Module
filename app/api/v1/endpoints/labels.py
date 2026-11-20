@@ -9,6 +9,7 @@ from app.core.dependencies import (
     LabelServiceDep,
     PaginationDep,
 )
+from app.core.openapi import build_error_responses
 from app.schemas.base import PaginatedResponse
 from app.schemas.label import LabelCreate, LabelResponse
 from app.schemas.task import TaskResponse
@@ -20,6 +21,13 @@ router = APIRouter()
     "/projects/{project_id}/labels",
     response_model=LabelResponse,
     status_code=status.HTTP_201_CREATED,
+    responses=build_error_responses(
+        status.HTTP_401_UNAUTHORIZED,
+        status.HTTP_403_FORBIDDEN,
+        status.HTTP_404_NOT_FOUND,
+        status.HTTP_409_CONFLICT,
+        status.HTTP_422_UNPROCESSABLE_CONTENT,
+    ),
     summary="Create label in project",
     description="Creates a new label within this project (OWNER/EDITOR or ADMIN only).",
 )
@@ -41,6 +49,11 @@ async def create_label_in_project(
     "/projects/{project_id}/labels",
     response_model=PaginatedResponse[LabelResponse],
     status_code=status.HTTP_200_OK,
+    responses=build_error_responses(
+        status.HTTP_401_UNAUTHORIZED,
+        status.HTTP_403_FORBIDDEN,
+        status.HTTP_404_NOT_FOUND,
+    ),
     summary="List labels in project",
     description="Lists all labels defined for this project (members or ADMIN).",
 )
@@ -62,6 +75,12 @@ async def list_labels_in_project(
     "/tasks/{task_id}/labels/{label_id}",
     response_model=TaskResponse,
     status_code=status.HTTP_200_OK,
+    responses=build_error_responses(
+        status.HTTP_400_BAD_REQUEST,
+        status.HTTP_401_UNAUTHORIZED,
+        status.HTTP_403_FORBIDDEN,
+        status.HTTP_404_NOT_FOUND,
+    ),
     summary="Assign label to task",
     description="Assigns a project-scoped label to a task.",
 )
@@ -81,6 +100,11 @@ async def attach_label(
     "/tasks/{task_id}/labels/{label_id}",
     response_model=TaskResponse,
     status_code=status.HTTP_200_OK,
+    responses=build_error_responses(
+        status.HTTP_401_UNAUTHORIZED,
+        status.HTTP_403_FORBIDDEN,
+        status.HTTP_404_NOT_FOUND,
+    ),
     summary="Remove label from task",
     description="Removes an assigned label from a task.",
 )
@@ -99,6 +123,11 @@ async def remove_label(
 @router.delete(
     "/labels/{label_id}",
     status_code=status.HTTP_204_NO_CONTENT,
+    responses=build_error_responses(
+        status.HTTP_401_UNAUTHORIZED,
+        status.HTTP_403_FORBIDDEN,
+        status.HTTP_404_NOT_FOUND,
+    ),
     summary="Delete a label",
     description="Deletes a project label (OWNER/EDITOR or ADMIN only).",
 )

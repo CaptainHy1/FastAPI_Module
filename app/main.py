@@ -29,6 +29,7 @@ from app.core.exception_handlers import (
 from app.core.exceptions import AppException
 from app.core.logging import configure_logging
 from app.core.middleware import RequestLoggingMiddleware
+from app.core.openapi import OPENAPI_DESCRIPTION, OPENAPI_TAGS
 
 configure_logging(get_settings().LOG_LEVEL)
 logger = logging.getLogger("taskhub")
@@ -66,7 +67,8 @@ def create_application() -> FastAPI:
     app = FastAPI(
         title=settings.PROJECT_NAME,
         version=settings.VERSION,
-        description="TaskHub API - Task Management System (Layered Architecture)",
+        description=OPENAPI_DESCRIPTION,
+        openapi_tags=OPENAPI_TAGS,
         docs_url="/docs",
         redoc_url="/redoc",
         openapi_url="/openapi.json",

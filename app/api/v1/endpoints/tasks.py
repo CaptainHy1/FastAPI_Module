@@ -10,6 +10,7 @@ from app.core.dependencies import (
     TaskFilterDep,
     TaskServiceDep,
 )
+from app.core.openapi import build_error_responses
 from app.schemas.base import PaginatedResponse
 from app.schemas.task import TaskCreate, TaskResponse, TaskUpdate
 
@@ -20,6 +21,13 @@ router = APIRouter()
     "",
     response_model=TaskResponse,
     status_code=status.HTTP_201_CREATED,
+    responses=build_error_responses(
+        status.HTTP_400_BAD_REQUEST,
+        status.HTTP_401_UNAUTHORIZED,
+        status.HTTP_403_FORBIDDEN,
+        status.HTTP_404_NOT_FOUND,
+        status.HTTP_422_UNPROCESSABLE_CONTENT,
+    ),
     summary="Create a new task",
     description=(
         "Creates a new task assigned to a project and returns the created task."
@@ -43,6 +51,7 @@ async def create_task(
     "",
     response_model=PaginatedResponse[TaskResponse],
     status_code=status.HTTP_200_OK,
+    responses=build_error_responses(status.HTTP_401_UNAUTHORIZED),
     summary="List tasks",
     description=(
         "Retrieves a paginated list of tasks with optional filters "
@@ -65,6 +74,11 @@ async def list_tasks(
     "/{task_id}",
     response_model=TaskResponse,
     status_code=status.HTTP_200_OK,
+    responses=build_error_responses(
+        status.HTTP_401_UNAUTHORIZED,
+        status.HTTP_403_FORBIDDEN,
+        status.HTTP_404_NOT_FOUND,
+    ),
     summary="Get task details",
     description="Retrieves details of a single task by its unique ID.",
 )
@@ -81,6 +95,13 @@ async def get_task(
     "/{task_id}",
     response_model=TaskResponse,
     status_code=status.HTTP_200_OK,
+    responses=build_error_responses(
+        status.HTTP_400_BAD_REQUEST,
+        status.HTTP_401_UNAUTHORIZED,
+        status.HTTP_403_FORBIDDEN,
+        status.HTTP_404_NOT_FOUND,
+        status.HTTP_422_UNPROCESSABLE_CONTENT,
+    ),
     summary="Update a task",
     description=(
         "Partially updates an existing task (title, description, status, priority)."
@@ -105,6 +126,11 @@ async def update_task(
 @router.delete(
     "/{task_id}",
     status_code=status.HTTP_204_NO_CONTENT,
+    responses=build_error_responses(
+        status.HTTP_401_UNAUTHORIZED,
+        status.HTTP_403_FORBIDDEN,
+        status.HTTP_404_NOT_FOUND,
+    ),
     summary="Delete a task",
     description="Deletes a task by its ID.",
 )
