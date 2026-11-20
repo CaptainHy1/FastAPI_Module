@@ -1,7 +1,5 @@
 """Project business logic service layer with workspace-scoped RBAC."""
 
-import math
-
 from app.core import messages
 from app.core.constants import ProjectStatus, WorkspaceRole
 from app.core.exceptions import NotFoundException
@@ -74,14 +72,10 @@ class ProjectService:
             skip=pagination.skip,
             limit=pagination.page_size,
         )
-        total_pages = math.ceil(total / pagination.page_size) if total > 0 else 0
-
-        return PaginatedResponse[ProjectResponse](
+        return PaginatedResponse.create(
             items=[ProjectResponse.model_validate(item) for item in items],
             total=total,
-            page=pagination.page,
-            page_size=pagination.page_size,
-            total_pages=total_pages,
+            pagination=pagination,
         )
 
     async def get_project_by_id(

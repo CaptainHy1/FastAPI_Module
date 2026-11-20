@@ -21,6 +21,7 @@ engine: AsyncEngine = create_async_engine(
     settings.DATABASE_URL,
     echo=settings.DB_ECHO,
     future=True,
+    pool_pre_ping=True,
 )
 
 if settings.DATABASE_URL.startswith("sqlite"):

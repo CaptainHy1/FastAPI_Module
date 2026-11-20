@@ -43,7 +43,7 @@ Client Request
 - **User Management**: Profile `GET/PATCH /users/me`, password change (revokes all refresh tokens), Admin CRUD with self-deletion and last-active-admin protection.
 - **Workspace & Project RBAC**: Fine-grained object-level authorization (`ADMIN`, `OWNER`, `EDITOR`, `VIEWER`) across Workspaces, Projects (including `ARCHIVED` lifecycle), and Tasks.
 - **Task Workflows, Labels & Comments**: Project-scoped labels, `task_labels` many-to-many assignment (same-project enforcement), task comments (author/owner deletion), workspace-member assignee validation, status transitions, and multi-criteria filtering + pagination.
-- **Redis Caching & Background Tasks**: Caches `GET /api/v1/projects/{id}/tasks` per filter/page with fail-open degradation and `SCAN`-based invalidation on task/label mutations; dispatches asynchronous email notifications via `BackgroundTasks` on task assignment.
+- **Redis Caching & Background Tasks**: Caches `GET /api/v1/projects/{id}/tasks` per filter/page with fail-open degradation, circuit breaker, and O(1) versioned cache invalidation on task/label mutations; dispatches asynchronous email notifications via `BackgroundTasks` on task assignment.
 - **OpenAPI Documentation**: Interactive Swagger UI (`/docs`) and ReDoc (`/redoc`) with HTTPBearer authentication scheme and documented `400/401/403/404/409/422` error envelopes.
 
 ---

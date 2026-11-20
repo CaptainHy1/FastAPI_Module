@@ -4,6 +4,7 @@ from typing import Any
 
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.core.constants import TaskPriority, TaskStatus
 from app.models.project import Project
@@ -45,7 +46,7 @@ class TaskRepository(BaseRepository[Task, TaskCreate, TaskUpdate]):
         **kwargs: Any,
     ) -> tuple[list[Task], int]:
         """Filter and paginate tasks using SQLAlchemy async queries."""
-        stmt = select(Task)
+        stmt = select(Task).options(selectinload(Task.labels))
         count_stmt = select(func.count(Task.id)).select_from(Task)
 
         status_filter: list[TaskStatus] | TaskStatus | None = kwargs.get("status")

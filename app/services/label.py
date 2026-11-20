@@ -1,7 +1,5 @@
 """Label business logic service layer."""
 
-import math
-
 from app.core import messages
 from app.core.cache import CacheManager
 from app.core.constants import WorkspaceRole
@@ -9,6 +7,7 @@ from app.core.exceptions import (
     BadRequestException,
     NotFoundException,
 )
+from app.models.task import Task
 from app.models.user import User
 from app.repositories.label import LabelRepository
 from app.repositories.project import ProjectRepository
@@ -97,13 +96,10 @@ class LabelService:
             skip=pagination.skip,
             limit=pagination.limit,
         )
-        total_pages = math.ceil(total / pagination.page_size) if total > 0 else 0
-        return PaginatedResponse(
+        return PaginatedResponse.create(
             items=[LabelResponse.model_validate(item) for item in items],
             total=total,
-            page=pagination.page,
-            page_size=pagination.page_size,
-            total_pages=total_pages,
+            pagination=pagination,
         )
 
     async def delete_label(self, label_id: int, current_user: User) -> None:
@@ -118,10 +114,10 @@ class LabelService:
         await self.repository.delete(label_id)
         await self.cache.invalidate_project_tasks(label.project_id)
 
-    async def attach_label_to_task(
-        self, task_id: int, label_id: int, current_user: User
-    ) -> TaskResponse:
-        """Attach label to task, ensuring same project and proper permissions."""
+    async def _verify_task_editor(
+        self, task_id: int, current_user: User
+    ) -> tuple[Task, int]:
+        """Verify task existence, project existence, and OWNER/EDITOR permissions."""
         task = await self.task_repository.get_by_id(task_id)
         if not task:
             raise NotFoundException(message=messages.TASK_NOT_FOUND)
@@ -130,7 +126,7 @@ class LabelService:
         if not project:
             raise NotFoundException(message=messages.PROJECT_NOT_FOUND)
 
-        # OWNER/EDITOR or ADMIN only (VIEWER assignees cannot attach labels)
+        # OWNER/EDITOR or ADMIN only (VIEWER assignees cannot attach or remove labels)
         await require_workspace_role(
             self.workspace_repository,
             project.workspace_id,
@@ -138,6 +134,13 @@ class LabelService:
             allowed_roles={WorkspaceRole.OWNER, WorkspaceRole.EDITOR},
             forbidden_message=messages.TASK_EDITOR_REQUIRED,
         )
+        return task, task.project_id
+
+    async def attach_label_to_task(
+        self, task_id: int, label_id: int, current_user: User
+    ) -> TaskResponse:
+        """Attach label to task, ensuring same project and proper permissions."""
+        task, project_id = await self._verify_task_editor(task_id, current_user)
 
         label = await self.repository.get_by_id(label_id)
         if not label:
@@ -147,7 +150,6 @@ class LabelService:
         if label.project_id != task.project_id:
             raise BadRequestException(message=messages.LABEL_PROJECT_MISMATCH)
 
-        project_id = task.project_id
         await self.repository.attach_to_task(task_id=task.id, label_id=label.id)
         await self.cache.invalidate_project_tasks(project_id)
         updated_task = await self.task_repository.get_by_id(task_id)
@@ -159,28 +161,12 @@ class LabelService:
         self, task_id: int, label_id: int, current_user: User
     ) -> TaskResponse:
         """Remove a label from a task."""
-        task = await self.task_repository.get_by_id(task_id)
-        if not task:
-            raise NotFoundException(message=messages.TASK_NOT_FOUND)
-
-        project = await self.project_repository.get_by_id(task.project_id)
-        if not project:
-            raise NotFoundException(message=messages.PROJECT_NOT_FOUND)
-
-        # Check permission: OWNER/EDITOR or ADMIN only
-        await require_workspace_role(
-            self.workspace_repository,
-            project.workspace_id,
-            current_user,
-            allowed_roles={WorkspaceRole.OWNER, WorkspaceRole.EDITOR},
-            forbidden_message=messages.TASK_EDITOR_REQUIRED,
-        )
+        task, project_id = await self._verify_task_editor(task_id, current_user)
 
         label = await self.repository.get_by_id(label_id)
         if not label:
             raise NotFoundException(message=messages.LABEL_NOT_FOUND)
 
-        project_id = task.project_id
         await self.repository.remove_from_task(task_id=task.id, label_id=label.id)
         await self.cache.invalidate_project_tasks(project_id)
         updated_task = await self.task_repository.get_by_id(task_id)
