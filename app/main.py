@@ -13,7 +13,13 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.v1.router import api_v1_router
+from app.core.cache import cache_manager
 from app.core.config import get_settings
+from app.core.constants import (
+    HEADER_PROCESS_TIME,
+    HEADER_REQUEST_ID,
+    Environment,
+)
 from app.core.database import engine
 from app.core.exception_handlers import (
     app_exception_handler,
@@ -21,12 +27,10 @@ from app.core.exception_handlers import (
     validation_exception_handler,
 )
 from app.core.exceptions import AppException
+from app.core.logging import configure_logging
+from app.core.middleware import RequestLoggingMiddleware
 
-# Configure root logger
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-)
+configure_logging(get_settings().LOG_LEVEL)
 logger = logging.getLogger("taskhub")
 
 
@@ -39,10 +43,19 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     )
     logger.info("Running in [%s] environment.", settings.ENVIRONMENT)
 
+    if settings.ENVIRONMENT != Environment.TESTING:
+        await cache_manager.connect(
+            redis_url=settings.REDIS_URL,
+            ttl=settings.CACHE_TTL_SECONDS,
+            socket_timeout=settings.REDIS_SOCKET_TIMEOUT,
+            socket_connect_timeout=settings.REDIS_CONNECT_TIMEOUT,
+        )
+
     yield
 
-    # Shutdown tasks: gracefully dispose SQLAlchemy connection pool
+    # Shutdown tasks: gracefully close Redis and SQLAlchemy connection pools
     logger.info("Shutting down %s...", settings.PROJECT_NAME)
+    await cache_manager.close()
     await engine.dispose()
 
 
@@ -60,7 +73,7 @@ def create_application() -> FastAPI:
         lifespan=lifespan,
     )
 
-    # Configure CORS Middleware
+    # CORS added first so outer RequestLoggingMiddleware logs all requests
     if settings.cors_origins:
         app.add_middleware(
             CORSMiddleware,
@@ -68,7 +81,11 @@ def create_application() -> FastAPI:
             allow_credentials=True,
             allow_methods=["*"],
             allow_headers=["*"],
+            expose_headers=[HEADER_REQUEST_ID, HEADER_PROCESS_TIME],
         )
+
+    # Register HTTP Request Logging & Correlation ID Middleware (outermost layer)
+    app.add_middleware(RequestLoggingMiddleware)
 
     # Register Exception Handlers
     app.add_exception_handler(AppException, app_exception_handler)  # type: ignore[arg-type]

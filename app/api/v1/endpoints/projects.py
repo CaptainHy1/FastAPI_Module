@@ -2,7 +2,7 @@
 
 from typing import Annotated
 
-from fastapi import APIRouter, Path, status
+from fastapi import APIRouter, BackgroundTasks, Path, status
 
 from app.core.dependencies import (
     CurrentUser,
@@ -89,10 +89,15 @@ async def create_task_in_project(
     task_in: TaskBase,
     current_user: CurrentUser,
     service: TaskServiceDep,
+    background_tasks: BackgroundTasks,
 ) -> TaskResponse:
     """Create task inside project endpoint."""
     task_create = TaskCreate(project_id=project_id, **task_in.model_dump())
-    return await service.create_task(task_in=task_create, current_user=current_user)
+    return await service.create_task(
+        task_in=task_create,
+        current_user=current_user,
+        background_tasks=background_tasks,
+    )
 
 
 @router.get(

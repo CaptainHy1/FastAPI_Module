@@ -111,4 +111,3 @@ def decode_token(token: str, expected_type: TokenType) -> tuple[int, str]:
         raise UnauthorizedException(message=messages.TOKEN_INVALID) from exc
 
     return user_id, raw_jti
-

@@ -378,8 +378,7 @@ async def test_task_assignment_validation_and_status_transitions(
     )
     assert bad_assign.status_code == 422
     assert (
-        bad_assign.json()["error"]["message"]
-        == messages.ASSIGNEE_NOT_WORKSPACE_MEMBER
+        bad_assign.json()["error"]["message"] == messages.ASSIGNEE_NOT_WORKSPACE_MEMBER
     )
 
     # Assign to valid member -> 201
