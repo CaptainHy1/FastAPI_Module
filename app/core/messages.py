@@ -58,6 +58,18 @@ CANNOT_REMOVE_WORKSPACE_OWNER: str = (
 ASSIGNEE_NOT_WORKSPACE_MEMBER: str = "Assignee must be a member of the workspace."
 ASSIGNEE_STATUS_ONLY: str = "Task assignees can only update task status."
 
+# Day 5: Labels & Comments & Assignee Messages
+LABEL_NOT_FOUND: str = "Label not found."
+LABEL_ALREADY_EXISTS: str = "Label with this name already exists in project."
+LABEL_ALREADY_ATTACHED: str = "Label is already assigned to this task."
+LABEL_PROJECT_MISMATCH: str = "Label does not belong to the same project as task."
+LABEL_NOT_ATTACHED: str = "Label is not attached to this task."
+COMMENT_NOT_FOUND: str = "Comment not found."
+COMMENT_DELETE_PERMISSION_DENIED: str = (
+    "Only comment author or workspace owner can delete comments."
+)
+ASSIGNEE_NOT_MEMBER: str = "Assignee must be a member of the workspace."
+
 # Common / Generic
 INTERNAL_SERVER_ERROR: str = "An unexpected error occurred. Please try again later."
 RESOURCE_NOT_FOUND: str = "The requested resource was not found."

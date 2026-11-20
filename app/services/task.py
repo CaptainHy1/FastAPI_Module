@@ -13,6 +13,7 @@ from app.models.project import Project
 from app.models.user import User
 from app.repositories.project import ProjectRepository
 from app.repositories.task import TaskRepository
+from app.repositories.user import UserRepository
 from app.repositories.workspace import WorkspaceRepository
 from app.schemas.base import PaginatedResponse, PaginationParams
 from app.schemas.task import (
@@ -32,10 +33,12 @@ class TaskService:
         repository: TaskRepository,
         project_repository: ProjectRepository,
         workspace_repository: WorkspaceRepository,
+        user_repository: UserRepository,
     ) -> None:
         self.repository = repository
         self.project_repository = project_repository
         self.workspace_repository = workspace_repository
+        self.user_repository = user_repository
 
     async def _verify_project_access(
         self,
@@ -62,6 +65,21 @@ class TaskService:
             forbidden_message=messages.TASK_EDITOR_REQUIRED,
         )
         return project
+
+    async def _verify_assignee(
+        self, workspace_id: int, assignee_id: int | None
+    ) -> None:
+        """Validate that assignee exists and belongs to workspace."""
+        if assignee_id is None:
+            return
+
+        membership = await self.workspace_repository.get_member(
+            workspace_id, assignee_id
+        )
+        if not membership:
+            raise UnprocessableEntityException(
+                message=messages.ASSIGNEE_NOT_WORKSPACE_MEMBER
+            )
 
     async def get_task_by_id(self, task_id: int, current_user: User) -> TaskResponse:
         """Fetch a task by ID checking workspace membership."""
@@ -126,15 +144,8 @@ class TaskService:
             user=current_user,
             require_editor=True,
         )
-
         if task_in.assignee_id is not None and project is not None:
-            assignee_member = await self.workspace_repository.get_member(
-                project.workspace_id, task_in.assignee_id
-            )
-            if not assignee_member:
-                raise UnprocessableEntityException(
-                    message=messages.ASSIGNEE_NOT_WORKSPACE_MEMBER
-                )
+            await self._verify_assignee(project.workspace_id, task_in.assignee_id)
 
         task = await self.repository.create(
             obj_in=task_in,
@@ -181,13 +192,7 @@ class TaskService:
         # Validate that new assignee (if provided) is a workspace member
         update_data = task_in.model_dump(exclude_unset=True)
         if "assignee_id" in update_data and task_in.assignee_id is not None:
-            assignee_member = await self.workspace_repository.get_member(
-                project.workspace_id, task_in.assignee_id
-            )
-            if not assignee_member:
-                raise UnprocessableEntityException(
-                    message=messages.ASSIGNEE_NOT_WORKSPACE_MEMBER
-                )
+            await self._verify_assignee(project.workspace_id, task_in.assignee_id)
 
         updated = await self.repository.update(task_id, obj_in=task_in)
         if not updated:

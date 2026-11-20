@@ -14,6 +14,7 @@ from app.core.constants import (
     TaskStatus,
 )
 from app.schemas.base import AppBaseModel
+from app.schemas.label import LabelResponse
 
 
 class TaskBase(AppBaseModel):
@@ -134,14 +135,19 @@ class TaskResponse(TaskBase):
     updated_at: datetime = Field(
         ..., description="Timestamp when task was last updated"
     )
+    labels: list[LabelResponse] = Field(
+        default_factory=list, description="Associated task labels"
+    )
 
 
 class TaskFilterParams(AppBaseModel):
     """Optional query parameters for filtering tasks."""
 
-    status: TaskStatus | None = Field(default=None, description="Filter by task status")
-    priority: TaskPriority | None = Field(
-        default=None, description="Filter by task priority"
+    status: list[TaskStatus] | None = Field(
+        default=None, description="Filter by task status(es)"
+    )
+    priority: list[TaskPriority] | None = Field(
+        default=None, description="Filter by task priority(ies)"
     )
     project_id: int | None = Field(
         default=None, gt=0, description="Filter by project ID"

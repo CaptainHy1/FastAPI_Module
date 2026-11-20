@@ -2,7 +2,16 @@
 
 from fastapi import APIRouter
 
-from app.api.v1.endpoints import auth, health, projects, tasks, users, workspaces
+from app.api.v1.endpoints import (
+    auth,
+    comments,
+    health,
+    labels,
+    projects,
+    tasks,
+    users,
+    workspaces,
+)
 
 api_v1_router = APIRouter()
 
@@ -14,3 +23,5 @@ api_v1_router.include_router(
 )
 api_v1_router.include_router(projects.router, prefix="/projects", tags=["Projects"])
 api_v1_router.include_router(tasks.router, prefix="/tasks", tags=["Tasks"])
+api_v1_router.include_router(labels.router, tags=["Labels"])
+api_v1_router.include_router(comments.router, tags=["Comments"])

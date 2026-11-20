@@ -19,6 +19,25 @@ class TaskRepository(BaseRepository[Task, TaskCreate, TaskUpdate]):
     def __init__(self, db: AsyncSession) -> None:
         super().__init__(model=Task, db=db)
 
+    async def get_by_id(self, id_: Any) -> Task | None:
+        """Retrieve a single task with labels loaded via selectin."""
+        stmt = select(Task).where(Task.id == id_)
+        result = await self.db.execute(stmt)
+        return result.scalars().first()
+
+    async def create(self, obj_in: TaskCreate, **extra_fields: Any) -> Task:
+        """Create a task and return with labels eagerly loaded."""
+        task = await super().create(obj_in, **extra_fields)
+        refreshed = await self.get_by_id(task.id)
+        return refreshed or task
+
+    async def update(self, id_: Any, obj_in: TaskUpdate, **kwargs: Any) -> Task | None:
+        """Update a task and return with labels eagerly loaded."""
+        task = await super().update(id_, obj_in, **kwargs)
+        if task:
+            return await self.get_by_id(id_)
+        return None
+
     async def list_items(
         self,
         skip: int = 0,
@@ -29,8 +48,10 @@ class TaskRepository(BaseRepository[Task, TaskCreate, TaskUpdate]):
         stmt = select(Task)
         count_stmt = select(func.count(Task.id)).select_from(Task)
 
-        status_filter: TaskStatus | None = kwargs.get("status")
-        priority_filter: TaskPriority | None = kwargs.get("priority")
+        status_filter: list[TaskStatus] | TaskStatus | None = kwargs.get("status")
+        priority_filter: list[TaskPriority] | TaskPriority | None = kwargs.get(
+            "priority"
+        )
         project_id_filter: int | None = kwargs.get("project_id")
         assignee_id_filter: int | None = kwargs.get("assignee_id")
         search: str | None = kwargs.get("search")
@@ -48,19 +69,33 @@ class TaskRepository(BaseRepository[Task, TaskCreate, TaskUpdate]):
                 & (WorkspaceMember.user_id == member_user_id),
             )
 
-        conditions = []
+        conditions: list[Any] = []
         if status_filter is not None:
-            conditions.append(Task.status == status_filter)
+            if isinstance(status_filter, list):
+                if status_filter:
+                    conditions.append(Task.status.in_(status_filter))
+            else:
+                conditions.append(Task.status == status_filter)
         if priority_filter is not None:
-            conditions.append(Task.priority == priority_filter)
+            if isinstance(priority_filter, list):
+                if priority_filter:
+                    conditions.append(Task.priority.in_(priority_filter))
+            else:
+                conditions.append(Task.priority == priority_filter)
         if project_id_filter is not None:
             conditions.append(Task.project_id == project_id_filter)
         if assignee_id_filter is not None:
             conditions.append(Task.assignee_id == assignee_id_filter)
         if search:
-            pattern = f"%{search}%"
+            escaped_search = (
+                search.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            )
+            pattern = f"%{escaped_search}%"
             conditions.append(
-                or_(Task.title.ilike(pattern), Task.description.ilike(pattern))
+                or_(
+                    Task.title.ilike(pattern, escape="\\"),
+                    Task.description.ilike(pattern, escape="\\"),
+                )
             )
 
         if conditions:

@@ -3,7 +3,15 @@
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Column, DateTime, ForeignKey, String, Table, func
+from sqlalchemy import (
+    Column,
+    DateTime,
+    ForeignKey,
+    String,
+    Table,
+    UniqueConstraint,
+    func,
+)
 from sqlalchemy import Enum as SAEnum
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -94,7 +102,7 @@ class Task(Base):
         foreign_keys=[created_by], back_populates="created_tasks"
     )
     labels: Mapped[list["Label"]] = relationship(
-        secondary=task_labels, back_populates="tasks"
+        secondary=task_labels, back_populates="tasks", lazy="selectin"
     )
     comments: Mapped[list["Comment"]] = relationship(
         back_populates="task", cascade="all, delete-orphan"
@@ -105,6 +113,9 @@ class Label(Base):
     """Project-scoped tag/label for categorizing tasks."""
 
     __tablename__ = "labels"
+    __table_args__ = (
+        UniqueConstraint("project_id", "name", name="uq_labels_project_id_name"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     project_id: Mapped[int] = mapped_column(
