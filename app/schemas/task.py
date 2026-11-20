@@ -6,8 +6,10 @@ from typing import Any
 from pydantic import Field, ValidationInfo, field_validator
 
 from app.core.constants import (
+    MAX_SEARCH_LENGTH,
     MAX_TASK_DESC_LENGTH,
     MAX_TASK_TITLE_LENGTH,
+    MIN_STRING_LENGTH,
     TaskPriority,
     TaskStatus,
 )
@@ -19,7 +21,7 @@ class TaskBase(AppBaseModel):
 
     title: str = Field(
         ...,
-        min_length=1,
+        min_length=MIN_STRING_LENGTH,
         max_length=MAX_TASK_TITLE_LENGTH,
         description="Task title (cannot be empty)",
         examples=["Set up project layered architecture"],
@@ -29,10 +31,6 @@ class TaskBase(AppBaseModel):
         max_length=MAX_TASK_DESC_LENGTH,
         description="Detailed description of the task",
         examples=["Implement clean routers, services, repositories, and schemas."],
-    )
-    status: TaskStatus = Field(
-        default=TaskStatus.TODO,
-        description="Task status workflow state",
     )
     priority: TaskPriority = Field(
         default=TaskPriority.MEDIUM,
@@ -50,7 +48,11 @@ class TaskBase(AppBaseModel):
 
 
 class TaskCreate(TaskBase):
-    """Schema for creating a new task."""
+    """Schema for creating a new task.
+
+    Note: status is intentionally omitted per reviewer requirement so client
+    cannot create a task directly in DONE status; defaults to TODO.
+    """
 
     project_id: int = Field(
         ...,
@@ -59,13 +61,23 @@ class TaskCreate(TaskBase):
         examples=[1],
     )
 
+    @field_validator("due_date", mode="after")
+    @classmethod
+    def validate_due_date_not_in_past(cls, v: datetime | None) -> datetime | None:
+        """Reject due_date values set in the past."""
+        if v is not None:
+            now = datetime.now(v.tzinfo) if v.tzinfo else datetime.now()
+            if v < now:
+                raise ValueError("due_date cannot be in the past.")
+        return v
+
 
 class TaskUpdate(AppBaseModel):
     """Schema for updating an existing task (PATCH partial update)."""
 
     title: str | None = Field(
         default=None,
-        min_length=1,
+        min_length=MIN_STRING_LENGTH,
         max_length=MAX_TASK_TITLE_LENGTH,
         description="Updated title",
     )
@@ -100,12 +112,23 @@ class TaskUpdate(AppBaseModel):
             raise ValueError(f"{info.field_name} cannot be null.")
         return v
 
+    @field_validator("due_date", mode="after")
+    @classmethod
+    def validate_due_date_not_in_past(cls, v: datetime | None) -> datetime | None:
+        """Reject due_date values set in the past."""
+        if v is not None:
+            now = datetime.now(v.tzinfo) if v.tzinfo else datetime.now()
+            if v < now:
+                raise ValueError("due_date cannot be in the past.")
+        return v
+
 
 class TaskResponse(TaskBase):
     """Schema for task data returned to client."""
 
     id: int = Field(..., gt=0, description="Unique task identifier")
     project_id: int = Field(..., gt=0, description="Parent project identifier")
+    status: TaskStatus = Field(..., description="Task workflow status")
     created_by: int = Field(..., gt=0, description="User ID who created the task")
     created_at: datetime = Field(..., description="Timestamp when task was created")
     updated_at: datetime = Field(
@@ -128,7 +151,7 @@ class TaskFilterParams(AppBaseModel):
     )
     search: str | None = Field(
         default=None,
-        min_length=1,
-        max_length=100,
+        min_length=MIN_STRING_LENGTH,
+        max_length=MAX_SEARCH_LENGTH,
         description="Search term in title or description",
     )

@@ -1,6 +1,8 @@
 """Application configuration and settings using Pydantic Settings."""
 
+import json
 from functools import lru_cache
+from json import JSONDecodeError
 from typing import Literal
 
 from pydantic import Field
@@ -52,13 +54,11 @@ class Settings(BaseSettings):
         """Parse comma-separated or JSON string of allowed CORS origins."""
         val = self.ALLOWED_ORIGINS.strip()
         if val.startswith("[") and val.endswith("]"):
-            import json
-
             try:
                 parsed = json.loads(val)
                 if isinstance(parsed, list):
                     return [str(item) for item in parsed]
-            except Exception:
+            except (JSONDecodeError, ValueError):
                 pass
         return [origin.strip() for origin in val.split(",") if origin.strip()]
 
