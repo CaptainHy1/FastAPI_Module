@@ -68,12 +68,8 @@ class LabelRepository(BaseRepository[Label, LabelCreate, LabelCreate]):
 
     async def remove_from_task(self, task_id: int, label_id: int) -> None:
         """Remove a label from a task; raise NotFoundException if not attached."""
-        stmt = (
-            delete(task_labels)
-            .where(
-                (task_labels.c.task_id == task_id)
-                & (task_labels.c.label_id == label_id)
-            )
+        stmt = delete(task_labels).where(
+            (task_labels.c.task_id == task_id) & (task_labels.c.label_id == label_id)
         )
         result = await self.db.execute(stmt)
         rowcount = result.rowcount if isinstance(result, CursorResult) else 0

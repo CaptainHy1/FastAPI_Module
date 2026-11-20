@@ -104,4 +104,3 @@ async def admin_delete_user(
 ) -> None:
     """Admin user deletion endpoint."""
     await service.admin_delete_user(admin_user, user_id)
-

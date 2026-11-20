@@ -82,4 +82,3 @@ async def logout(
     """Logout user endpoint."""
     await service.logout(payload)
     return MessageResponse(message=messages.LOGOUT_SUCCESS)
-

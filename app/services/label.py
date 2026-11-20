@@ -29,7 +29,7 @@ class LabelService:
         project_repository: ProjectRepository,
         task_repository: TaskRepository,
         workspace_repository: WorkspaceRepository,
-        cache: CacheManager | None = None,
+        cache: CacheManager,
     ) -> None:
         self.repository = repository
         self.project_repository = project_repository
@@ -116,8 +116,7 @@ class LabelService:
             project_id=label.project_id, user=current_user, require_editor=True
         )
         await self.repository.delete(label_id)
-        if self.cache is not None:
-            await self.cache.invalidate_project_tasks(label.project_id)
+        await self.cache.invalidate_project_tasks(label.project_id)
 
     async def attach_label_to_task(
         self, task_id: int, label_id: int, current_user: User
@@ -148,9 +147,9 @@ class LabelService:
         if label.project_id != task.project_id:
             raise BadRequestException(message=messages.LABEL_PROJECT_MISMATCH)
 
+        project_id = task.project_id
         await self.repository.attach_to_task(task_id=task.id, label_id=label.id)
-        if self.cache is not None:
-            await self.cache.invalidate_project_tasks(task.project_id)
+        await self.cache.invalidate_project_tasks(project_id)
         updated_task = await self.task_repository.get_by_id(task_id)
         if not updated_task:
             raise NotFoundException(message=messages.TASK_NOT_FOUND)
@@ -181,9 +180,9 @@ class LabelService:
         if not label:
             raise NotFoundException(message=messages.LABEL_NOT_FOUND)
 
+        project_id = task.project_id
         await self.repository.remove_from_task(task_id=task.id, label_id=label.id)
-        if self.cache is not None:
-            await self.cache.invalidate_project_tasks(task.project_id)
+        await self.cache.invalidate_project_tasks(project_id)
         updated_task = await self.task_repository.get_by_id(task_id)
         if not updated_task:
             raise NotFoundException(message=messages.TASK_NOT_FOUND)

@@ -57,19 +57,19 @@ class TaskRepository(BaseRepository[Task, TaskCreate, TaskUpdate]):
         search: str | None = kwargs.get("search")
         member_user_id: int | None = kwargs.get("member_user_id")
 
-        if member_user_id is not None:
-            stmt = stmt.join(Project, Task.project_id == Project.id).join(
-                WorkspaceMember,
-                (Project.workspace_id == WorkspaceMember.workspace_id)
-                & (WorkspaceMember.user_id == member_user_id),
-            )
-            count_stmt = count_stmt.join(Project, Task.project_id == Project.id).join(
-                WorkspaceMember,
-                (Project.workspace_id == WorkspaceMember.workspace_id)
-                & (WorkspaceMember.user_id == member_user_id),
-            )
-
         conditions: list[Any] = []
+
+        if member_user_id is not None:
+            user_projects_subquery = (
+                select(Project.id)
+                .join(
+                    WorkspaceMember,
+                    Project.workspace_id == WorkspaceMember.workspace_id,
+                )
+                .where(WorkspaceMember.user_id == member_user_id)
+            )
+            conditions.append(Task.project_id.in_(user_projects_subquery))
+
         if status_filter is not None:
             if isinstance(status_filter, list):
                 if status_filter:

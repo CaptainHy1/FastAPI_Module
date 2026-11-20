@@ -498,8 +498,7 @@ async def test_task_assignee_must_be_workspace_member(
     )
     assert fail_create.status_code == 422
     assert (
-        fail_create.json()["error"]["message"]
-        == messages.ASSIGNEE_NOT_WORKSPACE_MEMBER
+        fail_create.json()["error"]["message"] == messages.ASSIGNEE_NOT_WORKSPACE_MEMBER
     )
 
     # Creating task with valid assignee (None) -> 201
@@ -592,4 +591,3 @@ async def test_task_assignee_viewer_can_only_update_status(
     )
     assert assignee_res.status_code == 403
     assert assignee_res.json()["error"]["message"] == messages.ASSIGNEE_STATUS_ONLY
-

@@ -8,7 +8,13 @@ from typing import Literal
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from app.core.constants import DEFAULT_CACHE_TTL_SECONDS, DEFAULT_JWT_ALGORITHM
+from app.core.constants import (
+    DEFAULT_CACHE_TTL_SECONDS,
+    DEFAULT_JWT_ALGORITHM,
+    REDIS_CONNECT_TIMEOUT,
+    REDIS_SOCKET_TIMEOUT,
+    Environment,
+)
 
 
 class Settings(BaseSettings):
@@ -21,14 +27,11 @@ class Settings(BaseSettings):
     PROJECT_NAME: str = "TaskHub API"
     VERSION: str = "0.1.0"
     API_V1_STR: str = "/api/v1"
-    ENVIRONMENT: Literal["development", "testing", "staging", "production"] = (
-        "development"
-    )
+    ENVIRONMENT: Environment = Environment.DEVELOPMENT
     DEBUG: bool = True
     LOG_LEVEL: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
 
     # Security & JWT
-    # Enforces minimum 32 chars to fail fast if key is insecure or empty
     SECRET_KEY: str = Field(
         default="",
         min_length=32,
@@ -51,6 +54,8 @@ class Settings(BaseSettings):
         ge=1,
         description="Default Redis cache TTL in seconds",
     )
+    REDIS_SOCKET_TIMEOUT: float = REDIS_SOCKET_TIMEOUT
+    REDIS_CONNECT_TIMEOUT: float = REDIS_CONNECT_TIMEOUT
 
     # CORS
     ALLOWED_ORIGINS: str = "http://localhost:3000,http://127.0.0.1:3000"
